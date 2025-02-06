@@ -7,7 +7,7 @@ pub const Register = struct {
     sp: bool,
 
     pub fn from(enc: anytype, width: Width, sp: bool) Self {
-        const reg = @truncate(u5, enc);
+        const reg = @as(u5, @truncate(enc));
         return Self{ .reg = reg, .width = width, .sp = sp };
     }
 
@@ -49,8 +49,8 @@ pub const Width = enum {
     v,
 
     pub fn from(x: anytype) Self {
-        if (@typeInfo(@TypeOf(x)) != .Int) @compileError("Incorrect type passed into Width.from");
-        return @intToEnum(Self, x & 0x1);
+        if (@typeInfo(@TypeOf(x)) != .int) @compileError("Incorrect type passed into Width.from");
+        return @enumFromInt(x & 0x1);
     }
 };
 
@@ -59,12 +59,18 @@ pub fn matches(imm: anytype, comptime _match: []const u8) bool {
     const imm_size = @bitSizeOf(ImmType);
     comptime {
         const ImmInfo = @typeInfo(ImmType);
-        if (ImmInfo != .Int) @compileError("matches must be provided an integer type, found" ++ @typeName(ImmType));
+        if (ImmInfo != .int) @compileError("matches must be provided an integer type, found" ++ @typeName(ImmType));
         if (_match.len != imm_size + 2) @compileError("matches must be provided a string which is the length of imm with a `0b` prefix");
     }
     const match = _match[2..];
 
-    comptime var start_pos: usize = std.mem.indexOfAnyPos(u8, match, 0, &.{ '0', '1' }) orelse return true;
+    // TODO: This is simple fix to the new function called at runtime cannot return value at comptime error.
+    // i think this could be improved
+    comptime var start_pos_optional: ?usize = std.mem.indexOfAnyPos(u8, match, 0, &.{ '0', '1' });
+    if (start_pos_optional == null) {
+        return true;
+    }
+    comptime var start_pos: usize = start_pos_optional.?;
     comptime var end_pos: usize = std.mem.indexOfScalarPos(u8, match, start_pos, 'x') orelse match.len;
     inline while (true) {
         const bits_str = match[start_pos..end_pos];
@@ -76,9 +82,15 @@ pub fn matches(imm: anytype, comptime _match: []const u8) bool {
 
         const bits = comptime std.fmt.parseUnsigned(LenType, bits_str, 2) catch unreachable;
 
-        if (@truncate(LenType, imm >> shift) != bits)
+        if (@as(LenType, @truncate(imm >> shift)) != bits)
             return false;
-        start_pos = comptime std.mem.indexOfAnyPos(u8, match, end_pos, &.{ '0', '1' }) orelse return true;
+        // TODO: This is simple fix to the new function called at runtime cannot return value at comptime error.
+        // i think this could be improved
+        start_pos_optional = comptime std.mem.indexOfAnyPos(u8, match, end_pos, &.{ '0', '1' });
+        if (start_pos_optional == null) {
+            return true;
+        }
+        start_pos = start_pos_optional.?;
         end_pos = comptime std.mem.indexOfScalarPos(u8, match, start_pos, 'x') orelse match.len;
     }
 }

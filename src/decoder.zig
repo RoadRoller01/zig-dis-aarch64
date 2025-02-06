@@ -13,6 +13,7 @@ const BranchCondInstr = @import("instruction.zig").BranchCondInstr;
 const BranchInstr = @import("instruction.zig").BranchInstr;
 const CompBranchInstr = @import("instruction.zig").CompBranchInstr;
 const ConCompInstr = @import("instruction.zig").ConCompInstr;
+const ConSelectInstr = @import("instruction.zig").ConSelectInstr;
 const Condition = @import("instruction.zig").Condition;
 const CvtInstr = @import("instruction.zig").CvtInstr;
 const DataProcInstr = @import("instruction.zig").DataProcInstr;
@@ -55,13 +56,13 @@ pub const Disassembler = struct {
     pub fn next(self: *Self) Error!?Instruction {
         const reader = self.stream.reader();
 
-        const op = reader.readIntLittle(u32) catch return null;
+        const op = reader.readInt(u32, .little) catch return null;
 
         const op0 = op >> 31;
-        const op1 = @truncate(u4, op >> 25);
+        const op1 = @as(u4, @truncate(op >> 25));
 
         switch (op1) {
-            0b0000 => return try if (op0 == 0) decodeReserve(op) else decodeSME(op), // Reserved and SME
+            0b0000 => return if (op0 == 0) try decodeReserve(op) else try decodeSME(op), // Reserved and SME
             0b0001 => return error.Unallocated,
             0b0010 => return try decodeSVE(op), // SVE encoding
             0b0011 => return error.Unallocated,
@@ -89,7 +90,7 @@ pub const Disassembler = struct {
     }
 
     fn decodeDataProcImm(op: u32) Error!Instruction {
-        const op0 = @truncate(u3, op >> 23);
+        const op0 = @as(u3, @truncate(op >> 23));
 
         return switch (op0) {
             0b000, 0b001 => blk: {
@@ -97,8 +98,8 @@ pub const Disassembler = struct {
                 const payload = PCRelAddrInstr{
                     .p = p,
                     .rd = Register.from(op, .x, false),
-                    .immhi = @truncate(u19, op >> 5),
-                    .immlo = @truncate(u2, op >> 29),
+                    .immhi = @as(u19, @truncate(op >> 5)),
+                    .immlo = @as(u2, @truncate(op >> 29)),
                 };
                 break :blk if (p)
                     Instruction{ .adrp = payload }
@@ -106,8 +107,8 @@ pub const Disassembler = struct {
                     Instruction{ .adr = payload };
             },
             0b010 => blk: {
-                const s = @truncate(u1, op >> 29) == 1;
-                const op1 = @truncate(u1, op >> 30);
+                const s = @as(u1, @truncate(op >> 29)) == 1;
+                const op1 = @as(u1, @truncate(op >> 30));
                 const width = Width.from(op >> 31);
                 const payload = AddSubInstr{
                     .s = s,
@@ -116,8 +117,8 @@ pub const Disassembler = struct {
                     .rn = Register.from(op >> 5, width, true),
                     .rd = Register.from(op, width, !s),
                     .payload = .{ .imm12 = .{
-                        .sh = @truncate(u1, op >> 22),
-                        .imm = @truncate(u12, op >> 10),
+                        .sh = @as(u1, @truncate(op >> 22)),
+                        .imm = @as(u12, @truncate(op >> 10)),
                     } },
                 };
                 break :blk if (op1 == 0)
@@ -126,10 +127,10 @@ pub const Disassembler = struct {
                     Instruction{ .sub = payload };
             },
             0b011 => blk: {
-                const o2 = @truncate(u1, op >> 2);
-                const sf = @truncate(u1, op >> 31);
-                const s = @truncate(u1, op >> 29) == 1;
-                const add = @truncate(u1, op >> 30) == 0;
+                const o2 = @as(u1, @truncate(op >> 2));
+                const sf = @as(u1, @truncate(op >> 31));
+                const s = @as(u1, @truncate(op >> 29)) == 1;
+                const add = @as(u1, @truncate(op >> 30)) == 0;
                 const payload = AddSubInstr{
                     .s = s,
                     .op = if (add) .add else .sub,
@@ -137,8 +138,8 @@ pub const Disassembler = struct {
                     .rn = Register.from(op >> 5, .x, s),
                     .rd = Register.from(op, .x, s),
                     .payload = .{ .imm_tag = .{
-                        .imm6 = @truncate(u6, op >> 16),
-                        .imm4 = @truncate(u4, op >> 10),
+                        .imm6 = @as(u6, @truncate(op >> 16)),
+                        .imm4 = @as(u4, @truncate(op >> 10)),
                     } },
                 };
                 break :blk if (o2 == 1 or sf == 0 or (sf == 1 and s))
@@ -150,8 +151,8 @@ pub const Disassembler = struct {
             },
             0b100 => blk: {
                 const width = Width.from(op >> 31);
-                const n = @truncate(u1, op >> 22);
-                const opc = @truncate(u2, op >> 29);
+                const n = @as(u1, @truncate(op >> 22));
+                const opc = @as(u2, @truncate(op >> 29));
                 // TODO: stage1 moment
                 const LogTy = Field(LogInstr, .op);
                 const log_op = switch (opc) {
@@ -161,14 +162,14 @@ pub const Disassembler = struct {
                 };
                 const payload = LogInstr{
                     .s = opc == 0b11,
-                    .n = @truncate(u1, op >> 22),
+                    .n = @as(u1, @truncate(op >> 22)),
                     .op = log_op,
                     .width = width,
                     .rn = Register.from(op >> 5, width, false),
                     .rd = Register.from(op, width, true),
                     .payload = .{ .imm = .{
-                        .immr = @truncate(u6, op >> 16),
-                        .imms = @truncate(u6, op >> 10),
+                        .immr = @as(u6, @truncate(op >> 16)),
+                        .imms = @as(u6, @truncate(op >> 10)),
                     } },
                 };
                 break :blk if (width == .w and n == 1) error.Unallocated else switch (opc) {
@@ -179,16 +180,16 @@ pub const Disassembler = struct {
             },
             0b101 => blk: {
                 const width = Width.from(op >> 31);
-                const opc = @truncate(u2, op >> 29);
-                const hw = @truncate(u2, op >> 21);
-                const imm16 = @truncate(u16, op >> 5);
+                const opc = @as(u2, @truncate(op >> 29));
+                const hw = @as(u2, @truncate(op >> 21));
+                const imm16 = @as(u16, @truncate(op >> 5));
                 const ext: Field(MovInstr, .ext) = if (opc == 0b00)
-                    if (imm16 == 0x0000 and @truncate(u1, hw >> 1) != 0b0)
+                    if (imm16 == 0x0000 and @as(u1, @truncate(hw >> 1)) != 0b0)
                         .none
                     else
                         .n
                 else if (opc == 0b10)
-                    if (imm16 == 0x0000 and !(width == .x or @truncate(u1, hw >> 1) == 0b0))
+                    if (imm16 == 0x0000 and !(width == .x or @as(u1, @truncate(hw >> 1)) == 0b0))
                         .none
                     else
                         .z
@@ -198,20 +199,21 @@ pub const Disassembler = struct {
                     break :blk error.Unallocated;
                 break :blk if (width == .w and (hw == 0b10 or hw == 0b11))
                     error.Unallocated
-                else .{ .mov = .{
-                    .ext = ext,
-                    .width = width,
-                    .hw = hw,
-                    .imm16 = imm16,
-                    .rd = Register.from(op, width, false),
-                } };
+                else
+                    .{ .mov = .{
+                        .ext = ext,
+                        .width = width,
+                        .hw = hw,
+                        .imm16 = imm16,
+                        .rd = Register.from(op, width, false),
+                    } };
             },
             0b110 => blk: {
-                const opc = @truncate(u2, op >> 29);
-                const n = @truncate(u1, op >> 22);
-                const ext = @intToEnum(Field(BitfieldInstr, .ext), opc);
-                const immr = @truncate(u6, op >> 16);
-                const imms = @truncate(u6, op >> 10);
+                const opc = @as(u2, @truncate(op >> 29));
+                const n = @as(u1, @truncate(op >> 22));
+                const ext: Field(BitfieldInstr, .ext) = @enumFromInt(opc);
+                const immr = @as(u6, @truncate(op >> 16));
+                const imms = @as(u6, @truncate(op >> 10));
                 const rd_width = Width.from(op >> 31);
                 const rn_width = if (ext == .signed and ((immr == 0b000000 and imms == 0b000111) or
                     (immr == 0b000000 and imms == 0b001111) or (immr == 0b000000 and imms == 0b011111)))
@@ -226,23 +228,23 @@ pub const Disassembler = struct {
                         .n = n,
                         .width = rn_width,
                         .ext = ext,
-                        .immr = @truncate(u6, op >> 16),
-                        .imms = @truncate(u6, op >> 10),
+                        .immr = @as(u6, @truncate(op >> 16)),
+                        .imms = @as(u6, @truncate(op >> 10)),
                         .rn = Register.from(op >> 5, rn_width, false),
                         .rd = Register.from(op, rd_width, false),
                     } };
             },
             0b111 => blk: {
                 const width = Width.from(op >> 31);
-                const op21 = @truncate(u2, op >> 29);
-                const n = @truncate(u1, op >> 22);
-                const o0 = @truncate(u1, op >> 21);
-                const imms = @truncate(u6, op >> 10);
+                const op21 = @as(u2, @truncate(op >> 29));
+                const n = @as(u1, @truncate(op >> 22));
+                const o0 = @as(u1, @truncate(op >> 21));
+                const imms = @as(u6, @truncate(op >> 10));
                 break :blk if (op21 != 0b00 or
                     (op21 == 0b00 and o0 == 1) or
-                    (@enumToInt(width) == 0 and imms >= 0b100000) or
-                    (@enumToInt(width) == 0 and n == 1) or
-                    (@enumToInt(width) == 1 and n == 0))
+                    (@intFromEnum(width) == 0 and imms >= 0b100000) or
+                    (@intFromEnum(width) == 0 and n == 1) or
+                    (@intFromEnum(width) == 1 and n == 0))
                     error.Unallocated
                 else
                     Instruction{ .extr = ExtractInstr{
@@ -256,16 +258,16 @@ pub const Disassembler = struct {
     }
 
     fn decodeBranchExcpSysInstr(op: u32) Error!Instruction {
-        const op0 = @truncate(u3, op >> 29);
-        const op1 = @truncate(u14, op >> 12);
-        const op2 = @truncate(u5, op);
+        const op0 = @as(u3, @truncate(op >> 29));
+        const op1 = @as(u14, @truncate(op >> 12));
+        const op2 = @as(u5, @truncate(op));
 
         if (op0 == 0b010 and matches(op1, "0b0xxxxxxxxxxxxx")) {
-            const o0 = @truncate(u1, op >> 4);
-            const o1 = @truncate(u1, op >> 24);
+            const o0 = @as(u1, @truncate(op >> 4));
+            const o1 = @as(u1, @truncate(op >> 24));
             const payload = BranchCondInstr{
-                .imm19 = @truncate(u19, op >> 5),
-                .cond = @intToEnum(Condition, @truncate(u4, op)),
+                .imm19 = @as(u19, @truncate(op >> 5)),
+                .cond = @enumFromInt(@as(u4, @truncate(op))),
             };
             return if (o0 == 0b0 and o1 == 0b0)
                 Instruction{ .bcond = payload }
@@ -274,10 +276,10 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (op0 == 0b110 and matches(op1, "0b00xxxxxxxxxxxx")) {
-            const opc = @truncate(u3, op >> 21);
-            const opc2 = @truncate(u3, op >> 2);
-            const ll = @truncate(u2, op);
-            const payload = ExceptionInstr{ .imm16 = @truncate(u16, op >> 5) };
+            const opc = @as(u3, @truncate(op >> 21));
+            const opc2 = @as(u3, @truncate(op >> 2));
+            const ll = @as(u2, @truncate(op));
+            const payload = ExceptionInstr{ .imm16 = @as(u16, @truncate(op >> 5)) };
             return if (opc == 0b000 and opc2 == 0b000 and ll == 0b01)
                 Instruction{ .svc = payload }
             else if (opc == 0b000 and opc2 == 0b000 and ll == 0b10)
@@ -299,8 +301,8 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (op0 == 0b110 and op1 == 0b01000000110001) {
-            const crm = @truncate(u4, op >> 8);
-            const o2 = @truncate(u3, op >> 5);
+            const crm = @as(u4, @truncate(op >> 8));
+            const o2 = @as(u3, @truncate(op >> 5));
             const payload = SysWithRegInstr{
                 .rd = Register.from(op, .x, false),
             };
@@ -311,8 +313,8 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (op0 == 0b110 and op1 == 0b01000000110010 and op2 == 0b11111) {
-            const crm = @truncate(u4, op >> 8);
-            const o2 = @truncate(u3, op >> 5);
+            const crm = @as(u4, @truncate(op >> 8));
+            const o2 = @as(u3, @truncate(op >> 5));
             return if (crm == 0b0000 and o2 == 0b000)
                 @as(Instruction, Instruction.nop)
             else if (crm == 0b0000 and o2 == 0b001)
@@ -361,33 +363,34 @@ pub const Disassembler = struct {
                 @as(Instruction, Instruction.autibz)
             else if (crm == 0b0011 and o2 == 0b111)
                 @as(Instruction, Instruction.autibsp)
-            else if (crm == 0b0100 and @truncate(u1, o2) == 0b0)
+            else if (crm == 0b0100 and @as(u1, @truncate(o2)) == 0b0)
                 @as(Instruction, Instruction.bti)
-            else .{ .hint = .{ .imm = @as(u7, crm) << 3 | op2 } };
+            else
+                .{ .hint = .{ .imm = @as(u7, crm) << 3 | op2 } };
         } else if (op0 == 0b110 and op1 == 0b01000000110011) {
-            const crm = @truncate(u4, op >> 8);
-            const opc2 = @truncate(u3, op >> 5);
-            const rt = @truncate(u5, op);
+            const crm = @as(u4, @truncate(op >> 8));
+            const opc2 = @as(u3, @truncate(op >> 5));
+            const rt = @as(u5, @truncate(op));
             return if (opc2 == 0b010 and rt == 0b11111)
-                Instruction{ .clrex = @truncate(u4, op >> 8) }
+                Instruction{ .clrex = @as(u4, @truncate(op >> 8)) }
             else if (opc2 == 0b100 and rt == 0b11111)
-                Instruction{ .dsb = @truncate(u4, op >> 8) }
+                Instruction{ .dsb = @as(u4, @truncate(op >> 8)) }
             else if (opc2 == 0b101 and rt == 0b11111)
-                Instruction{ .dmb = @truncate(u4, op >> 8) }
+                Instruction{ .dmb = @as(u4, @truncate(op >> 8)) }
             else if (opc2 == 0b110 and rt == 0b11111)
-                Instruction{ .isb = @truncate(u4, op >> 8) }
+                Instruction{ .isb = @as(u4, @truncate(op >> 8)) }
             else if (opc2 == 0b111 and rt == 0b11111)
                 @as(Instruction, Instruction.sb)
-            else if (@truncate(u2, crm) == 0b10 and opc2 == 0b001 and rt == 0b11111)
-                Instruction{ .dsb = @truncate(u4, op >> 8) }
+            else if (@as(u2, @truncate(crm)) == 0b10 and opc2 == 0b001 and rt == 0b11111)
+                Instruction{ .dsb = @as(u4, @truncate(op >> 8)) }
             else if (crm == 0b0000 and opc2 == 0b011 and rt == 0b11111)
                 @as(Instruction, Instruction.tcommit)
             else
                 error.Unallocated;
         } else if (op0 == 0b110 and matches(op1, "0b0100000xxx0100")) {
-            const instr1 = @truncate(u3, op >> 16);
-            const instr2 = @truncate(u3, op >> 5);
-            const rt = @truncate(u5, op);
+            const instr1 = @as(u3, @truncate(op >> 16));
+            const instr2 = @as(u3, @truncate(op >> 5));
+            const rt = @as(u5, @truncate(op));
             return if (instr1 == 0b000 and instr2 == 0b000 and rt == 0b11111)
                 @as(Instruction, Instruction.cfinv)
             else if (instr1 == 0b000 and instr2 == 0b001 and rt == 0b11111)
@@ -397,21 +400,21 @@ pub const Disassembler = struct {
             else if (rt == 0b11111) blk: {
                 const payload = SysRegMoveInstr{
                     .rt = Register.from(op, .x, false),
-                    .op2 = @truncate(u3, op >> 5),
-                    .crm = @truncate(u4, op >> 8),
-                    .crn = @truncate(u4, op >> 12),
-                    .op1 = @truncate(u3, op >> 16),
-                    .o0 = @truncate(u1, op >> 19),
-                    .o20 = @truncate(u1, op >> 20),
+                    .op2 = @as(u3, @truncate(op >> 5)),
+                    .crm = @as(u4, @truncate(op >> 8)),
+                    .crn = @as(u4, @truncate(op >> 12)),
+                    .op1 = @as(u3, @truncate(op >> 16)),
+                    .o0 = @as(u1, @truncate(op >> 19)),
+                    .o20 = @as(u1, @truncate(op >> 20)),
                     .op = .write,
                 };
                 break :blk Instruction{ .msr = payload };
             } else error.Unallocated;
         } else if (op0 == 0b110 and matches(op1, "0b0100100xxxxxxx")) {
-            const o1 = @truncate(u3, op >> 16);
-            const crn = @truncate(u4, op >> 12);
-            const crm = @truncate(u4, op >> 8);
-            const o2 = @truncate(u3, op >> 5);
+            const o1 = @as(u3, @truncate(op >> 16));
+            const crn = @as(u4, @truncate(op >> 12));
+            const crm = @as(u4, @truncate(op >> 8));
+            const o2 = @as(u3, @truncate(op >> 5));
             const payload = SysWithResInstr{ .rt = Register.from(op, .x, false) };
             return if (o1 == 0b011 and crn == 0b0011 and crm == 0b0000 and o2 == 0b011)
                 Instruction{ .tstart = payload }
@@ -420,26 +423,26 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (op0 == 0b110 and matches(op1, "0b0100x01xxxxxxx")) {
-            const l = @truncate(u1, op >> 21) == 1;
+            const l = @as(u1, @truncate(op >> 21)) == 1;
             const payload = SysInstr{
                 .l = l,
                 .rt = Register.from(op, .x, false),
-                .op2 = @truncate(u3, op >> 5),
-                .crm = @truncate(u4, op >> 8),
-                .crn = @truncate(u4, op >> 12),
-                .op1 = @truncate(u3, op >> 16),
+                .op2 = @as(u3, @truncate(op >> 5)),
+                .crm = @as(u4, @truncate(op >> 8)),
+                .crn = @as(u4, @truncate(op >> 12)),
+                .op1 = @as(u3, @truncate(op >> 16)),
             };
             return Instruction{ .sys = payload };
         } else if (op0 == 0b110 and matches(op1, "0b0100x1xxxxxxxx")) {
-            const l = @truncate(u1, op >> 21) == 1;
+            const l = @as(u1, @truncate(op >> 21)) == 1;
             const payload = SysRegMoveInstr{
                 .rt = Register.from(op, .x, false),
-                .op2 = @truncate(u3, op >> 5),
-                .crm = @truncate(u4, op >> 8),
-                .crn = @truncate(u4, op >> 12),
-                .op1 = @truncate(u3, op >> 16),
-                .o0 = @truncate(u1, op >> 19),
-                .o20 = @truncate(u1, op >> 20),
+                .op2 = @as(u3, @truncate(op >> 5)),
+                .crm = @as(u4, @truncate(op >> 8)),
+                .crn = @as(u4, @truncate(op >> 12)),
+                .op1 = @as(u3, @truncate(op >> 16)),
+                .o0 = @as(u1, @truncate(op >> 19)),
+                .o20 = @as(u1, @truncate(op >> 20)),
                 .op = if (l) .write else .read,
             };
             return if (l)
@@ -447,10 +450,10 @@ pub const Disassembler = struct {
             else
                 Instruction{ .msr = payload };
         } else if (op0 == 0b110 and matches(op1, "0b1xxxxxxxxxxxxx")) {
-            const opc = @truncate(u4, op >> 21);
-            const o2 = @truncate(u5, op >> 16);
-            const o3 = @truncate(u6, op >> 10);
-            const o4 = @truncate(u5, op);
+            const opc = @as(u4, @truncate(op >> 21));
+            const o2 = @as(u5, @truncate(op >> 16));
+            const o3 = @as(u6, @truncate(op >> 10));
+            const o4 = @as(u5, @truncate(op));
             const rn = Register.from(op >> 5, .x, false);
             const payload = BranchInstr{ .reg = rn };
             return if (opc == 0b0000 and o2 == 0b11111 and o3 == 0b000000 and o4 == 0b00000)
@@ -468,17 +471,17 @@ pub const Disassembler = struct {
             else
                 error.Unimplemented; // Pauth
         } else if (op0 == 0b000 or op0 == 0b100) {
-            const o = @truncate(u1, op >> 31);
-            const payload = BranchInstr{ .imm = @truncate(u26, op) };
+            const o = @as(u1, @truncate(op >> 31));
+            const payload = BranchInstr{ .imm = @as(u26, @truncate(op)) };
             return if (o == 0)
                 Instruction{ .b = payload }
             else
                 Instruction{ .bl = payload };
         } else if (matches(op0, "0bx01") and matches(op1, "0b0xxxxxxxxxxxxx")) {
             const width = Width.from(op >> 31);
-            const neg = @truncate(u1, op >> 24) == 1;
+            const neg = @as(u1, @truncate(op >> 24)) == 1;
             const payload = CompBranchInstr{
-                .imm19 = @truncate(u19, op >> 5),
+                .imm19 = @as(u19, @truncate(op >> 5)),
                 .rt = Register.from(op, width, false),
             };
             return if (neg)
@@ -486,11 +489,11 @@ pub const Disassembler = struct {
             else
                 Instruction{ .cbz = payload };
         } else if (matches(op0, "0bx01") and matches(op1, "0b1xxxxxxxxxxxxx")) {
-            const o = @truncate(u1, op >> 24);
+            const o = @as(u1, @truncate(op >> 24));
             const payload = TestInstr{
-                .b5 = @truncate(u1, op >> 31),
-                .b40 = @truncate(u5, op >> 19),
-                .imm14 = @truncate(u14, op >> 5),
+                .b5 = @as(u1, @truncate(op >> 31)),
+                .b40 = @as(u5, @truncate(op >> 19)),
+                .imm14 = @as(u14, @truncate(op >> 5)),
                 .rt = Register.from(op, .x, false),
             };
             return if (o == 0)
@@ -501,35 +504,35 @@ pub const Disassembler = struct {
     }
 
     fn decodeLoadStore(op: u32) Error!Instruction {
-        const op0 = @truncate(u4, op >> 28);
-        const op1 = @truncate(u1, op >> 26);
-        const op2 = @truncate(u2, op >> 23);
-        const op3 = @truncate(u6, op >> 16);
-        const op4 = @truncate(u2, op >> 10);
+        const op0 = @as(u4, @truncate(op >> 28));
+        const op1 = @as(u1, @truncate(op >> 26));
+        const op2 = @as(u2, @truncate(op >> 23));
+        const op3 = @as(u6, @truncate(op >> 16));
+        const op4 = @as(u2, @truncate(op >> 10));
         const ExtTy = Field(LoadStoreInstr, .ext);
         const OpTy = Field(LoadStoreInstr, .op);
         const SizeTy = Field(LoadStoreInstr, .size);
         const LdStPayloadTy = Field(LoadStoreInstr, .payload);
-        const IndexTy = @typeInfo(Field(LoadStoreInstr, .index)).Optional.child;
+        const IndexTy = @typeInfo(Field(LoadStoreInstr, .index)).optional.child;
         const LdStPrfm = Field(LoadStoreInstr, .ld_st_prfm);
         if (matches(op0, "0b0x00") and op1 == 0b1 and op2 == 0b00 and matches(op3, "0b1xxxxx"))
             return error.Unimplemented // Compare and swap pair
         else if (matches(op0, "0b0x00") and op1 == 1 and op2 == 0b00 and op3 == 0b00000) { // Advanced SIMD load/store multiple structures
-            const l = @truncate(u1, op >> 22);
-            const opcode = @truncate(u4, op >> 12);
-            const t = @truncate(u5, op);
+            const l = @as(u1, @truncate(op >> 22));
+            const opcode = @as(u4, @truncate(op >> 12));
+            const t = @as(u5, @truncate(op));
             const rn = Register.from(op >> 5, .x, true);
             const rt = Register.from(t, .v, false);
             const rt2 = Register.from((t + 1) % 31, .v, false);
             const rt3 = Register.from((t + 2) % 31, .v, false);
             const rt4 = Register.from((t + 3) % 31, .v, false);
-            const size = @truncate(u2, op >> 10);
-            const q = @truncate(u1, op >> 30);
+            const size = @as(u2, @truncate(op >> 10));
+            const q = @as(u1, @truncate(op >> 30));
             const sizeq = @as(u3, size) << 1 | q;
             return if (l == 0b0 and opcode == 0b0000)
                 Instruction{ .st4 = SIMDLoadStoreInstr{
                     .arrangement = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -540,7 +543,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b0 and opcode == 0b0010)
                 Instruction{ .st1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -550,7 +553,7 @@ pub const Disassembler = struct {
             else if (l == 0b0 and opcode == 0b0100)
                 Instruction{ .st3 = SIMDLoadStoreInstr{
                     .arrangement = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -560,7 +563,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b0 and opcode == 0b0110)
                 Instruction{ .st1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -568,14 +571,14 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b0 and opcode == 0b0111)
                 Instruction{ .st1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                 } }
             else if (l == 0b0 and opcode == 0b1000)
                 Instruction{ .st2 = SIMDLoadStoreInstr{
                     .arrangement = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -584,7 +587,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b0 and opcode == 0b1010)
                 Instruction{ .st1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -592,7 +595,7 @@ pub const Disassembler = struct {
             else if (l == 0b1 and opcode == 0b0000)
                 Instruction{ .ld4 = SIMDLoadStoreInstr{
                     .arrangement = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -603,7 +606,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b1 and opcode == 0b0010)
                 Instruction{ .ld1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -613,7 +616,7 @@ pub const Disassembler = struct {
             else if (l == 0b1 and opcode == 0b0100)
                 Instruction{ .ld3 = SIMDLoadStoreInstr{
                     .arrangement = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -623,7 +626,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b1 and opcode == 0b0110)
                 Instruction{ .ld1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -631,14 +634,14 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b1 and opcode == 0b0111)
                 Instruction{ .ld1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                 } }
             else if (l == 0b1 and opcode == 0b1000)
                 Instruction{ .ld2 = SIMDLoadStoreInstr{
                     .arrangement = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -647,7 +650,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b1 and opcode == 0b1010)
                 Instruction{ .ld1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -655,23 +658,23 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0b0x00") and op1 == 1 and op2 == 0b01 and matches(op3, "0b0xxxxx")) { // Advanced SIMD load/store multiple structures (post-indexed)
-            const l = @truncate(u1, op >> 22);
-            const m = @truncate(u5, op >> 16);
-            const t = @truncate(u5, op);
-            const opcode = @truncate(u4, op >> 12);
+            const l = @as(u1, @truncate(op >> 22));
+            const m = @as(u5, @truncate(op >> 16));
+            const t = @as(u5, @truncate(op));
+            const opcode = @as(u4, @truncate(op >> 12));
             const rn = Register.from(op >> 5, .x, true);
             const rt = Register.from(t, .v, false);
             const rt2 = Register.from((t + 1) % 31, .v, false);
             const rt3 = Register.from((t + 2) % 31, .v, false);
             const rt4 = Register.from((t + 3) % 31, .v, false);
             const rm = Register.from(m, .x, false);
-            const size = @truncate(u2, op >> 10);
-            const q = @truncate(u1, op >> 30);
+            const size = @as(u2, @truncate(op >> 10));
+            const q = @as(u1, @truncate(op >> 30));
             const sizeq = @as(u3, size) << 1 | q;
             return if (l == 0b0 and opcode == 0b0000)
                 Instruction{ .st4 = SIMDLoadStoreInstr{
                     .arrangement = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -683,7 +686,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b0 and opcode == 0b0010)
                 Instruction{ .st1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -694,7 +697,7 @@ pub const Disassembler = struct {
             else if (l == 0b0 and opcode == 0b0100)
                 Instruction{ .st3 = SIMDLoadStoreInstr{
                     .arrangement = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -705,7 +708,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b0 and opcode == 0b0110)
                 Instruction{ .st1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -714,7 +717,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b0 and opcode == 0b0111)
                 Instruction{ .st1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = (@as(u7, q) + 1) * 8 },
@@ -722,7 +725,7 @@ pub const Disassembler = struct {
             else if (l == 0b0 and opcode == 0b1000)
                 Instruction{ .st2 = SIMDLoadStoreInstr{
                     .arrangement = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -732,7 +735,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b0 and opcode == 0b1010)
                 Instruction{ .st1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -741,7 +744,7 @@ pub const Disassembler = struct {
             else if (l == 0b1 and opcode == 0b0000)
                 Instruction{ .ld4 = SIMDLoadStoreInstr{
                     .arrangement = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -753,7 +756,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b1 and opcode == 0b0010)
                 Instruction{ .ld1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -764,7 +767,7 @@ pub const Disassembler = struct {
             else if (l == 0b1 and opcode == 0b0100)
                 Instruction{ .ld3 = SIMDLoadStoreInstr{
                     .arrangement = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -775,7 +778,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b1 and opcode == 0b0110)
                 Instruction{ .ld1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -784,7 +787,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b1 and opcode == 0b0111)
                 Instruction{ .ld1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = (@as(u7, q) + 1) * 8 },
@@ -792,7 +795,7 @@ pub const Disassembler = struct {
             else if (l == 0b1 and opcode == 0b1000)
                 Instruction{ .ld2 = SIMDLoadStoreInstr{
                     .arrangement = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -802,7 +805,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b1 and opcode == 0b1010)
                 Instruction{ .ld1 = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -811,18 +814,18 @@ pub const Disassembler = struct {
             else
                 error.Unimplemented;
         } else if (matches(op0, "0b0x00") and op1 == 1 and op2 == 0b10 and matches(op3, "0bx00000")) { // Advanced SIMD load/store single structure (post-indexed)
-            const l = @truncate(u1, op >> 22);
-            const r = @truncate(u1, op >> 21);
-            const opcode = @truncate(u3, op >> 13);
-            const s = @truncate(u1, op >> 12);
-            const size = @truncate(u2, op >> 10);
-            const t = @truncate(u5, op);
+            const l = @as(u1, @truncate(op >> 22));
+            const r = @as(u1, @truncate(op >> 21));
+            const opcode = @as(u3, @truncate(op >> 13));
+            const s = @as(u1, @truncate(op >> 12));
+            const size = @as(u2, @truncate(op >> 10));
+            const t = @as(u5, @truncate(op));
             const rn = Register.from(op >> 5, .x, true);
             const rt = Register.from(t, .v, false);
             const rt2 = Register.from((t + 1) % 31, .v, false);
             const rt3 = Register.from((t + 2) % 31, .v, false);
             const rt4 = Register.from((t + 3) % 31, .v, false);
-            const q = @truncate(u1, op >> 30);
+            const q = @as(u1, @truncate(op >> 30));
             const sizeq = @as(u3, size) << 1 | q;
             return if (l == 0b0 and r == 0b0 and opcode == 0b000)
                 Instruction{ .st1 = SIMDLoadStoreInstr{
@@ -840,21 +843,21 @@ pub const Disassembler = struct {
                     .rt3 = rt3,
                     .index = @as(u4, q) << 3 | @as(u4, s) << 2 | size,
                 } }
-            else if (l == 0b0 and r == 0b0 and opcode == 0b010 and @truncate(u1, size) == 0b0)
+            else if (l == 0b0 and r == 0b0 and opcode == 0b010 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .st1 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
                     .rt = rt,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                 } }
-            else if (l == 0b0 and r == 0b0 and opcode == 0b011 and @truncate(u1, size) == 0b0)
+            else if (l == 0b0 and r == 0b0 and opcode == 0b011 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .st3 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
                     .rt3 = rt3,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                 } }
             else if (l == 0b0 and r == 0b0 and opcode == 0b100 and size == 0b00)
                 Instruction{ .st1 = SIMDLoadStoreInstr{
@@ -906,15 +909,15 @@ pub const Disassembler = struct {
                     .rt4 = rt4,
                     .index = @as(u4, q) << 3 | @as(u4, s) << 2 | size,
                 } }
-            else if (l == 0b0 and r == 0b1 and opcode == 0b010 and @truncate(u1, size) == 0b0)
+            else if (l == 0b0 and r == 0b1 and opcode == 0b010 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .st2 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                 } }
-            else if (l == 0b0 and r == 0b1 and opcode == 0b011 and @truncate(u1, size) == 0b0)
+            else if (l == 0b0 and r == 0b1 and opcode == 0b011 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .st4 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
@@ -922,7 +925,7 @@ pub const Disassembler = struct {
                     .rt2 = rt2,
                     .rt3 = rt3,
                     .rt4 = rt4,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                 } }
             else if (l == 0b0 and r == 0b1 and opcode == 0b100 and size == 0b00)
                 Instruction{ .st2 = SIMDLoadStoreInstr{
@@ -976,21 +979,21 @@ pub const Disassembler = struct {
                     .rt3 = rt3,
                     .index = @as(u4, q) << 3 | @as(u4, s) << 2 | size,
                 } }
-            else if (l == 0b1 and r == 0b0 and opcode == 0b010 and @truncate(u1, size) == 0b0)
+            else if (l == 0b1 and r == 0b0 and opcode == 0b010 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .ld1 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
                     .rt = rt,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                 } }
-            else if (l == 0b1 and r == 0b0 and opcode == 0b011 and @truncate(u1, size) == 0b0)
+            else if (l == 0b1 and r == 0b0 and opcode == 0b011 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .ld3 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
                     .rt3 = rt3,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                 } }
             else if (l == 0b1 and r == 0b0 and opcode == 0b100 and size == 0b00)
                 Instruction{ .ld1 = SIMDLoadStoreInstr{
@@ -1026,13 +1029,13 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b1 and r == 0b0 and opcode == 0b110 and s == 0b0)
                 Instruction{ .ld1r = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                 } }
             else if (l == 0b1 and r == 0b0 and opcode == 0b111 and s == 0b0)
                 Instruction{ .ld3r = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -1056,15 +1059,15 @@ pub const Disassembler = struct {
                     .rt4 = rt4,
                     .index = @as(u4, q) << 3 | @as(u4, s) << 2 | size,
                 } }
-            else if (l == 0b1 and r == 0b1 and opcode == 0b010 and @truncate(u1, size) == 0b0)
+            else if (l == 0b1 and r == 0b1 and opcode == 0b010 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .ld2 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                 } }
-            else if (l == 0b1 and r == 0b1 and opcode == 0b011 and @truncate(u1, size) == 0b0)
+            else if (l == 0b1 and r == 0b1 and opcode == 0b011 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .ld4 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
@@ -1072,7 +1075,7 @@ pub const Disassembler = struct {
                     .rt2 = rt2,
                     .rt3 = rt3,
                     .rt4 = rt4,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                 } }
             else if (l == 0b1 and r == 0b1 and opcode == 0b100 and size == 0b00)
                 Instruction{ .ld2 = SIMDLoadStoreInstr{
@@ -1112,14 +1115,14 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b1 and r == 0b1 and opcode == 0b110 and s == 0b0)
                 Instruction{ .ld2r = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
                 } }
             else if (l == 0b1 and r == 0b1 and opcode == 0b111 and s == 0b0)
                 Instruction{ .ld4r = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -1129,20 +1132,20 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0b0x00") and op1 == 1 and op2 == 0b11) { // Advanced SIMD load/store single structure (post-indexed)
-            const l = @truncate(u1, op >> 22);
-            const r = @truncate(u1, op >> 21);
-            const s = @truncate(u1, op >> 12);
-            const size = @truncate(u2, op >> 10);
-            const m = @truncate(u5, op >> 16);
-            const t = @truncate(u5, op);
-            const opcode = @truncate(u3, op >> 13);
+            const l = @as(u1, @truncate(op >> 22));
+            const r = @as(u1, @truncate(op >> 21));
+            const s = @as(u1, @truncate(op >> 12));
+            const size = @as(u2, @truncate(op >> 10));
+            const m = @as(u5, @truncate(op >> 16));
+            const t = @as(u5, @truncate(op));
+            const opcode = @as(u3, @truncate(op >> 13));
             const rn = Register.from(op >> 5, .x, true);
             const rt = Register.from(t, .v, false);
             const rt2 = Register.from((t + 1) % 31, .v, false);
             const rt3 = Register.from((t + 2) % 31, .v, false);
             const rt4 = Register.from((t + 3) % 31, .v, false);
             const rm = Register.from(m, .x, false);
-            const q = @truncate(u1, op >> 30);
+            const q = @as(u1, @truncate(op >> 30));
             const sizeq = @as(u3, size) << 1 | q;
             return if (l == 0b0 and r == 0b0 and opcode == 0b000)
                 Instruction{ .st1 = SIMDLoadStoreInstr{
@@ -1162,22 +1165,22 @@ pub const Disassembler = struct {
                     .index = @as(u4, q) << 3 | @as(u4, s) << 2 | size,
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = 3 },
                 } }
-            else if (l == 0b0 and r == 0b0 and opcode == 0b010 and @truncate(u1, size) == 0b0)
+            else if (l == 0b0 and r == 0b0 and opcode == 0b010 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .st1 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
                     .rt = rt,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = 2 },
                 } }
-            else if (l == 0b0 and r == 0b0 and opcode == 0b011 and @truncate(u1, size) == 0b0)
+            else if (l == 0b0 and r == 0b0 and opcode == 0b011 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .st3 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
                     .rt3 = rt3,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = 6 },
                 } }
             else if (l == 0b0 and r == 0b0 and opcode == 0b100 and size == 0b00)
@@ -1236,16 +1239,16 @@ pub const Disassembler = struct {
                     .index = @as(u4, q) << 3 | @as(u4, s) << 2 | size,
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = 4 },
                 } }
-            else if (l == 0b0 and r == 0b1 and opcode == 0b010 and @truncate(u1, size) == 0b0)
+            else if (l == 0b0 and r == 0b1 and opcode == 0b010 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .st2 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = 4 },
                 } }
-            else if (l == 0b0 and r == 0b1 and opcode == 0b011 and @truncate(u1, size) == 0b0)
+            else if (l == 0b0 and r == 0b1 and opcode == 0b011 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .st4 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
@@ -1253,7 +1256,7 @@ pub const Disassembler = struct {
                     .rt2 = rt2,
                     .rt3 = rt3,
                     .rt4 = rt4,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = 8 },
                 } }
             else if (l == 0b0 and r == 0b1 and opcode == 0b100 and size == 0b00)
@@ -1314,22 +1317,22 @@ pub const Disassembler = struct {
                     .index = @as(u4, q) << 3 | @as(u4, s) << 2 | size,
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = 3 },
                 } }
-            else if (l == 0b1 and r == 0b0 and opcode == 0b010 and @truncate(u1, size) == 0b0)
+            else if (l == 0b1 and r == 0b0 and opcode == 0b010 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .ld1 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
                     .rt = rt,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = 2 },
                 } }
-            else if (l == 0b1 and r == 0b0 and opcode == 0b011 and @truncate(u1, size) == 0b0)
+            else if (l == 0b1 and r == 0b0 and opcode == 0b011 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .ld3 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
                     .rt3 = rt3,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = 6 },
                 } }
             else if (l == 0b1 and r == 0b0 and opcode == 0b100 and size == 0b00)
@@ -1370,14 +1373,14 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b1 and r == 0b0 and opcode == 0b110 and s == 0b0)
                 Instruction{ .ld1r = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = @as(u7, 0b1) << size },
                 } }
             else if (l == 0b1 and r == 0b0 and opcode == 0b111 and s == 0b0)
                 Instruction{ .ld3r = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -1404,16 +1407,16 @@ pub const Disassembler = struct {
                     .index = @as(u4, q) << 3 | @as(u4, s) << 2 | size,
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = 4 },
                 } }
-            else if (l == 0b1 and r == 0b1 and opcode == 0b010 and @truncate(u1, size) == 0b0)
+            else if (l == 0b1 and r == 0b1 and opcode == 0b010 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .ld2 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = 4 },
                 } }
-            else if (l == 0b1 and r == 0b1 and opcode == 0b011 and @truncate(u1, size) == 0b0)
+            else if (l == 0b1 and r == 0b1 and opcode == 0b011 and @as(u1, @truncate(size)) == 0b0)
                 Instruction{ .ld4 = SIMDLoadStoreInstr{
                     .arrangement = SIMDArrangement.h,
                     .rn = rn,
@@ -1421,7 +1424,7 @@ pub const Disassembler = struct {
                     .rt2 = rt2,
                     .rt3 = rt3,
                     .rt4 = rt4,
-                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @truncate(u1, size >> 1),
+                    .index = @as(u3, q) << 2 | @as(u3, s) << 1 | @as(u1, @truncate(size >> 1)),
                     .payload = if (m != 0b11111) .{ .rm = rm } else .{ .imm = 8 },
                 } }
             else if (l == 0b1 and r == 0b1 and opcode == 0b100 and size == 0b00)
@@ -1466,7 +1469,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b1 and r == 0b1 and opcode == 0b110 and s == 0b0)
                 Instruction{ .ld2r = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -1474,7 +1477,7 @@ pub const Disassembler = struct {
                 } }
             else if (l == 0b1 and r == 0b1 and opcode == 0b111 and s == 0b0)
                 Instruction{ .ld4r = SIMDLoadStoreInstr{
-                    .arrangement = @intToEnum(SIMDArrangement, sizeq),
+                    .arrangement = @enumFromInt(sizeq),
                     .rn = rn,
                     .rt = rt,
                     .rt2 = rt2,
@@ -1488,8 +1491,8 @@ pub const Disassembler = struct {
             return error.Unimplemented
         else if (matches(op0, "0b1x00") and op1 == 0 and op2 == 0b00 and matches(op3, "0b1xxxxx")) { // Load/store exclusive pair
             const width = Width.from(op >> 30);
-            const load = @truncate(u1, op >> 22) == 1;
-            const o0 = @truncate(u1, op >> 15) == 1;
+            const load = @as(u1, @truncate(op >> 22)) == 1;
+            const o0 = @as(u1, @truncate(op >> 15)) == 1;
             const ext = if (load and o0)
                 ExtTy.a
             else if (!load and o0)
@@ -1516,9 +1519,9 @@ pub const Disassembler = struct {
             else
                 return Instruction{ .st = payload };
         } else if (matches(op0, "0bxx00") and op1 == 0 and op2 == 0b00 and matches(op3, "0b0xxxxx")) { // Load/store exclusive register
-            const reg_size = @truncate(u2, op >> 30);
-            const load = @truncate(u1, op >> 22) == 1;
-            const o0 = @truncate(u1, op >> 15) == 1;
+            const reg_size = @as(u2, @truncate(op >> 30));
+            const load = @as(u1, @truncate(op >> 22)) == 1;
+            const o0 = @as(u1, @truncate(op >> 15)) == 1;
             const width = if (reg_size == 0b11) Width.x else Width.w;
             const ext = if (load)
                 if (o0) ExtTy.a else ExtTy.none
@@ -1544,9 +1547,9 @@ pub const Disassembler = struct {
             else
                 Instruction{ .st = payload };
         } else if (matches(op0, "0bxx00") and op1 == 0 and op2 == 0b01 and matches(op3, "0b0xxxxx")) { // Load/store ordered
-            const reg_size = @truncate(u2, op >> 30);
-            const load = @truncate(u1, op >> 22) == 1;
-            const o0 = @truncate(u1, op >> 15) == 1;
+            const reg_size = @as(u2, @truncate(op >> 30));
+            const load = @as(u1, @truncate(op >> 22)) == 1;
+            const o0 = @as(u1, @truncate(op >> 15)) == 1;
             const width = if (reg_size == 0b11) Width.x else Width.w;
             const ext = if (load)
                 if (o0) ExtTy.a else ExtTy.la
@@ -1576,8 +1579,8 @@ pub const Disassembler = struct {
         } else if (matches(op0, "0bxx00") and op1 == 0 and op2 == 0b01 and matches(op3, "0b1xxxxx")) // Compare and swap
             return error.Unimplemented
         else if (matches(op0, "0bxx01") and op1 == 0 and matches(op2, "0b1x") and matches(op3, "0b0xxxxx") and op4 == 0b00) {
-            const reg_size = @truncate(u2, op >> 30);
-            const opc = @truncate(u2, op >> 22);
+            const reg_size = @as(u2, @truncate(op >> 30));
+            const opc = @as(u2, @truncate(op >> 22));
             const size = if (reg_size == 0b00)
                 if (opc <= 0b01)
                     SizeTy.b
@@ -1603,7 +1606,7 @@ pub const Disassembler = struct {
                 .ext = ext,
                 .op = .r,
                 .size = size,
-                .payload = .{ .simm9 = @truncate(u9, op >> 12) },
+                .payload = .{ .simm9 = @as(u9, @truncate(op >> 12)) },
             };
             return if ((reg_size == 0b10 and opc == 0b11) or (reg_size == 0b11 and opc >= 0b10))
                 error.Unallocated
@@ -1612,8 +1615,8 @@ pub const Disassembler = struct {
             else
                 Instruction{ .st = payload };
         } else if (matches(op0, "0bxx01") and matches(op2, "0b0x")) { // Load register (literal)
-            const opc = @truncate(u2, op >> 30);
-            const v = @truncate(u1, op >> 26);
+            const opc = @as(u2, @truncate(op >> 30));
+            const v = @as(u1, @truncate(op >> 26));
             const width = switch (@as(u3, opc) << 1 | v) {
                 0b000, 0b110 => Width.w,
                 0b001 => Width.s,
@@ -1623,7 +1626,7 @@ pub const Disassembler = struct {
                 else => return error.Unallocated,
             };
             const size_ext = if (opc == 0b10 and v == 0) SizeTy.sw else SizeTy.none;
-            var imm19 = @truncate(u19, op >> 5);
+            const imm19 = @as(u19, @truncate(op >> 5));
             const payload = LoadStoreInstr{
                 .ld_st_prfm = if (opc == 0b11 and v == 0) .prfm else .ld,
                 .rn = undefined,
@@ -1640,9 +1643,9 @@ pub const Disassembler = struct {
         } else if (matches(op0, "0bxx01") and matches(op2, "0b1x") and matches(op3, "0b0xxxxx") and op4 == 0b01) // Memory Copy and Memory Set
             return error.Unimplemented
         else if (matches(op0, "0bxx10") and op2 == 0b00) { // Load/store no-allocate pair (offset)
-            const opc = @truncate(u2, op >> 30);
-            const v = @truncate(u1, op >> 26);
-            const load = @truncate(u1, op >> 22) == 1;
+            const opc = @as(u2, @truncate(op >> 30));
+            const v = @as(u1, @truncate(op >> 26));
+            const load = @as(u1, @truncate(op >> 22)) == 1;
             const width = if (opc == 0b00 and v == 0)
                 Width.w
             else if (opc == 0b10 and v == 0)
@@ -1655,7 +1658,7 @@ pub const Disassembler = struct {
                 Width.q
             else
                 return error.Unallocated;
-            var simm7 = @intCast(i64, @bitCast(i7, @truncate(u7, op >> 15)));
+            var simm7 = @as(i64, @intCast(@as(i7, @bitCast(@as(u7, @truncate(op >> 15))))));
             simm7 *%= switch (width) {
                 .w, .s => 4,
                 .x, .d => 8,
@@ -1677,9 +1680,9 @@ pub const Disassembler = struct {
             else
                 Instruction{ .st = payload };
         } else if (matches(op0, "0bxx10") and op2 != 0b00) { // Load/store register pair
-            const opc = @truncate(u2, op >> 30);
-            const v = @truncate(u1, op >> 26);
-            const load = @truncate(u1, op >> 22) == 1;
+            const opc = @as(u2, @truncate(op >> 30));
+            const v = @as(u1, @truncate(op >> 26));
+            const load = @as(u1, @truncate(op >> 22)) == 1;
             const ext = if (opc == 0b01 and v == 0 and !load)
                 ExtTy.g
             else
@@ -1707,7 +1710,7 @@ pub const Disassembler = struct {
                 Width.q
             else
                 unreachable;
-            var simm7 = @intCast(i64, @bitCast(i7, @truncate(u7, op >> 15)));
+            var simm7 = @as(i64, @intCast(@as(i7, @bitCast(@as(u7, @truncate(op >> 15))))));
             simm7 *%= if (size == .sw)
                 4
             else switch (width) {
@@ -1732,10 +1735,10 @@ pub const Disassembler = struct {
             else
                 Instruction{ .st = payload };
         } else if (matches(op0, "0bxx11") and matches(op2, "0b0x") and matches(op3, "0b0xxxxx")) { // Load/store register
-            const size = @truncate(u2, op >> 30);
-            const v = @truncate(u1, op >> 26);
-            const opc = @truncate(u2, op >> 22);
-            const load = switch (@truncate(u3, op >> 26) << 2 | @truncate(u2, op >> 22)) {
+            const size = @as(u2, @truncate(op >> 30));
+            const v = @as(u1, @truncate(op >> 26));
+            const opc = @as(u2, @truncate(op >> 22));
+            const load = switch (@as(u3, @truncate(op >> 26)) << 2 | @as(u2, @truncate(op >> 22))) {
                 0b000,
                 0b100,
                 0b110,
@@ -1807,10 +1810,10 @@ pub const Disassembler = struct {
                 .ext = ext,
                 .op = .r,
                 .size = size_ext,
-                .payload = .{ .simm9 = @truncate(u9, op >> 12) },
+                .payload = .{ .simm9 = @as(u9, @truncate(op >> 12)) },
                 .index = index,
             };
-            return if ((@truncate(u1, size) == 1 and v == 1 and opc >= 0b10) or
+            return if ((@as(u1, @truncate(size)) == 1 and v == 1 and opc >= 0b10) or
                 (size >= 0b10 and v == 0 and opc == 0b11) or
                 (size >= 0b10 and v == 1 and opc >= 0b10))
                 error.Unallocated
@@ -1823,10 +1826,10 @@ pub const Disassembler = struct {
         } else if (matches(op0, "0bxx11") and matches(op2, "0b0x") and matches(op3, "0b1xxxxx") and op4 == 0b00) { // Atomic memory operations
             return error.Unimplemented;
         } else if (matches(op0, "0bxx11") and matches(op2, "0b0x") and matches(op3, "0b1xxxxx") and op4 == 0b10) { // Load/store register (register offset)
-            const size = @truncate(u2, op >> 30);
-            const v = @truncate(u1, op >> 26);
-            const opc = @truncate(u2, op >> 22);
-            const option = @truncate(u3, op >> 13);
+            const size = @as(u2, @truncate(op >> 30));
+            const v = @as(u1, @truncate(op >> 26));
+            const opc = @as(u2, @truncate(op >> 22));
+            const option = @as(u3, @truncate(op >> 13));
             const rn = Register.from(op >> 5, .x, true);
             const rt_width = if ((size == 0b00 and v == 0 and opc != 0b10) or
                 (size == 0b01 and v == 0 and opc != 0b10) or
@@ -1867,11 +1870,11 @@ pub const Disassembler = struct {
                 SizeTy.sw
             else
                 SizeTy.none;
-            const rm_width = if (@truncate(u1, option) == 0)
+            const rm_width = if (@as(u1, @truncate(option)) == 0)
                 Width.w
             else
                 Width.x;
-            const shift_not_zero = @truncate(u1, op >> 12) == 1;
+            const shift_not_zero = @as(u1, @truncate(op >> 12)) == 1;
             const amount = if (shift_not_zero and (rt_width == .b or size_ext == .b or size_ext == .sb))
                 0
             else if (shift_not_zero and (rt_width == .h or size_ext == .h or size_ext == .sh))
@@ -1885,15 +1888,17 @@ pub const Disassembler = struct {
                 @as(u8, 4)
             else
                 0;
-            const shift = LdStPayloadTy{ .shifted_reg = .{
-                .rm = Register.from(op >> 16, rm_width, false),
-                .shift = shift_not_zero,
-                .amount = amount,
-                .shift_type = @intToEnum(
-                    Field(Field(LdStPayloadTy, .shifted_reg), .shift_type),
-                    option,
-                ),
-            } };
+            const shift = LdStPayloadTy{
+                .shifted_reg = .{
+                    .rm = Register.from(op >> 16, rm_width, false),
+                    .shift = shift_not_zero,
+                    .amount = amount,
+                    .shift_type = @enumFromInt(
+                        // Field(Field(LdStPayloadTy, .shifted_reg), .shift_type),
+                        option,
+                    ),
+                },
+            };
             const ld_st_prfm = if ((size == 0b00 and v == 0 and opc == 0b01) or
                 (size == 0b00 and v == 0 and opc == 0b10) or
                 (size == 0b00 and v == 0 and opc == 0b11) or
@@ -1947,9 +1952,9 @@ pub const Disassembler = struct {
             else
                 Instruction{ .st = payload };
         } else if (matches(op0, "0bxx11") and matches(op2, "0b1x")) { // Load/store register (unsigned immediate)
-            const v = @truncate(u1, op >> 26);
-            const opc = @truncate(u2, op >> 22);
-            const size = @truncate(u2, op >> 30);
+            const v = @as(u1, @truncate(op >> 26));
+            const opc = @as(u2, @truncate(op >> 22));
+            const size = @as(u2, @truncate(op >> 30));
             const SizeExt = Field(LoadStoreInstr, .size);
             const size_ext = if (size == 0b00 and v == 0 and opc <= 0b01)
                 SizeExt.b
@@ -1993,7 +1998,7 @@ pub const Disassembler = struct {
                 (size == 0b10 and v == 1 and opc == 0b00) or
                 (size == 0b11 and v == 0 and opc == 0b00) or
                 (size == 0b11 and v == 1 and opc == 0b00));
-            var imm12 = @truncate(u12, op >> 10);
+            var imm12 = @as(u12, @truncate(op >> 10));
             imm12 *%= if ((size == 0b01 and v == 0) or
                 (size == 0b01 and v == 0 and opc >= 0b10))
                 2
@@ -2021,7 +2026,7 @@ pub const Disassembler = struct {
                 .size = size_ext,
                 .payload = .{ .imm12 = imm12 },
             };
-            return if ((@truncate(u1, size) == 0b1 and v == 1 and opc >= 0b10) or
+            return if ((@as(u1, @truncate(size)) == 0b1 and v == 1 and opc >= 0b10) or
                 (size >= 0b10 and v == 0 and opc == 0b11) or
                 (size >= 0b10 and v == 1 and opc >= 0b10))
                 error.Unallocated
@@ -2035,20 +2040,20 @@ pub const Disassembler = struct {
     }
 
     fn decodeDataProcReg(op: u32) Error!Instruction {
-        const op0 = @truncate(u1, op >> 30);
-        const op1 = @truncate(u1, op >> 28);
-        const op2 = @truncate(u4, op >> 21);
-        const op3 = @truncate(u6, op >> 10);
+        const op0 = @as(u1, @truncate(op >> 30));
+        const op1 = @as(u1, @truncate(op >> 28));
+        const op2 = @as(u4, @truncate(op >> 21));
+        const op3 = @as(u6, @truncate(op >> 10));
         _ = op0;
 
         // TODO: refactor to use return on top if (fixed in stage2)
         // https://github.com/ziglang/zig/issues/10601
         return if (op1 == 0) switch (op2) {
             0b0000...0b0111 => blk: { // logical shifted reg
-                const imm6 = @truncate(u6, op >> 10);
-                const opc = @truncate(u2, op >> 29);
+                const imm6 = @as(u6, @truncate(op >> 10));
+                const opc = @as(u2, @truncate(op >> 29));
                 const width = Width.from(op >> 31);
-                const n = @truncate(u1, op >> 21);
+                const n = @as(u1, @truncate(op >> 21));
                 // TODO: stage1 moment
                 const LogTy = Field(LogInstr, .op);
                 const log_op = switch (@as(u3, opc) << 1 | n) {
@@ -2061,7 +2066,7 @@ pub const Disassembler = struct {
                 };
                 const payload = LogInstr{
                     .s = opc == 0b11,
-                    .n = @truncate(u1, op >> 21),
+                    .n = @as(u1, @truncate(op >> 21)),
                     .op = log_op,
                     .width = width,
                     // TODO: check sp
@@ -2070,7 +2075,7 @@ pub const Disassembler = struct {
                     .payload = .{ .shift_reg = .{
                         .rm = Register.from(op >> 16, width, false),
                         .imm6 = imm6,
-                        .shift = @truncate(u2, op >> 22),
+                        .shift = @as(u2, @truncate(op >> 22)),
                     } },
                 };
                 break :blk if (width == .w and imm6 >= 0b100000)
@@ -2087,8 +2092,8 @@ pub const Disassembler = struct {
 
             0b1000, 0b1010, 0b1100, 0b1110 => blk: { // add/sub shifted reg
                 const width = Width.from(op >> 31);
-                const s = @truncate(u1, op >> 29) == 1;
-                const add = @truncate(u1, op >> 30) == 0;
+                const s = @as(u1, @truncate(op >> 29)) == 1;
+                const add = @as(u1, @truncate(op >> 30)) == 0;
                 const payload = AddSubInstr{
                     .s = s,
                     .op = if (add) .add else .sub,
@@ -2097,8 +2102,8 @@ pub const Disassembler = struct {
                     .rd = Register.from(op, width, false),
                     .payload = .{ .shift_reg = .{
                         .rm = Register.from(op >> 16, width, false),
-                        .imm6 = @truncate(u6, op >> 10),
-                        .shift = @truncate(u2, op >> 22),
+                        .imm6 = @as(u6, @truncate(op >> 10)),
+                        .shift = @as(u2, @truncate(op >> 22)),
                     } },
                 };
                 break :blk if (add)
@@ -2109,10 +2114,10 @@ pub const Disassembler = struct {
 
             0b1001, 0b1011, 0b1101, 0b1111 => blk: { // add/sub extended reg
                 const width = Width.from(op >> 31);
-                const s = @truncate(u1, op >> 29) == 1;
-                const add = @truncate(u1, op >> 30) == 0;
-                const opt = @truncate(u2, op >> 22);
-                const imm3 = @truncate(u3, op >> 10);
+                const s = @as(u1, @truncate(op >> 29)) == 1;
+                const add = @as(u1, @truncate(op >> 30)) == 0;
+                const opt = @as(u2, @truncate(op >> 22));
+                const imm3 = @as(u3, @truncate(op >> 10));
                 const payload = AddSubInstr{
                     .s = s,
                     .op = if (add) .add else .sub,
@@ -2121,7 +2126,7 @@ pub const Disassembler = struct {
                     .rd = Register.from(op, width, !s),
                     .payload = .{ .ext_reg = .{
                         .rm = Register.from(op >> 16, width, false),
-                        .option = @truncate(u3, op >> 13),
+                        .option = @as(u3, @truncate(op >> 13)),
                         .imm3 = imm3,
                     } },
                 };
@@ -2135,10 +2140,10 @@ pub const Disassembler = struct {
         } else switch (op2) {
             0b0000 => switch (op3) {
                 0b000000 => {
-                    const adc = @truncate(u1, op >> 30) == 0;
+                    const adc = @as(u1, @truncate(op >> 30)) == 0;
                     const width = Width.from(op >> 31);
                     const payload = AddSubInstr{
-                        .s = @truncate(u1, op >> 29) == 1,
+                        .s = @as(u1, @truncate(op >> 29)) == 1,
                         .op = if (adc) .adc else .sbc,
                         .width = width,
                         .rn = Register.from(op >> 5, width, false),
@@ -2156,19 +2161,19 @@ pub const Disassembler = struct {
             },
 
             0b0010 => { // cond compare
-                const reg = @truncate(u1, op >> 11) == 0;
+                const reg = @as(u1, @truncate(op >> 11)) == 0;
                 const width = Width.from(op >> 31);
-                const o3 = @truncate(u1, op >> 4);
-                const o2 = @truncate(u1, op >> 10);
-                const s = @truncate(u1, op >> 29);
-                const cmn = @truncate(u1, op >> 30) == 0;
+                const o3 = @as(u1, @truncate(op >> 4));
+                const o2 = @as(u1, @truncate(op >> 10));
+                const s = @as(u1, @truncate(op >> 29));
+                const cmn = @as(u1, @truncate(op >> 30)) == 0;
                 const payload = ConCompInstr{
-                    .cond = @intToEnum(Condition, @truncate(u4, op >> 12)),
+                    .cond = @enumFromInt(@as(u4, @truncate(op >> 12))),
                     .rn = Register.from(op >> 5, width, false),
-                    .nzcv = @truncate(u4, op),
+                    .nzcv = @as(u4, @truncate(op)),
                     .payload = if (reg) .{
                         .rm = Register.from(op >> 16, width, false),
-                    } else .{ .imm5 = @truncate(u5, op >> 16) },
+                    } else .{ .imm5 = @as(u5, @truncate(op >> 16)) },
                 };
                 return if (o3 == 1 or o2 == 1 or s == 0)
                     error.Unallocated
@@ -2180,12 +2185,12 @@ pub const Disassembler = struct {
 
             0b0100 => { // condselect
                 const width = Width.from(op >> 31);
-                const s = @truncate(u1, op >> 29);
-                const o = @truncate(u1, op >> 30);
-                const o2 = @truncate(u2, op >> 10);
-                const payload = .{
+                const s = @as(u1, @truncate(op >> 29));
+                const o = @as(u1, @truncate(op >> 30));
+                const o2 = @as(u2, @truncate(op >> 10));
+                const payload = ConSelectInstr{
                     .rm = Register.from(op >> 16, width, false),
-                    .cond = @intToEnum(Condition, @truncate(u4, op >> 12)),
+                    .cond = @enumFromInt(@as(u4, @truncate(op >> 12))),
                     .rn = Register.from(op >> 5, width, false),
                     .rd = Register.from(op, width, false),
                 };
@@ -2205,9 +2210,9 @@ pub const Disassembler = struct {
 
             0b0110 => { // data processing 1/2 source
                 const width = Width.from(op >> 31);
-                const one_source = @truncate(u1, op >> 30) == 1;
-                const opcode = @truncate(u6, op >> 10);
-                const s = @truncate(u1, op >> 29);
+                const one_source = @as(u1, @truncate(op >> 30)) == 1;
+                const opcode = @as(u6, @truncate(op >> 10));
+                const s = @as(u1, @truncate(op >> 29));
                 const payload = DataProcInstr{
                     // TODO: check for sp
                     .rm = if (!one_source) Register.from(op >> 16, width, false) else null,
@@ -2215,8 +2220,8 @@ pub const Disassembler = struct {
                     .rd = Register.from(op, width, false),
                 };
                 return if (one_source) blk: {
-                    const opcode2 = @truncate(u5, op >> 16);
-                    const rn = @truncate(u5, op >> 5);
+                    const opcode2 = @as(u5, @truncate(op >> 16));
+                    const rn = @as(u5, @truncate(op >> 5));
                     break :blk if (s == 1)
                         error.Unallocated
                     else if (opcode == 0b000000 and opcode2 == 0b00000)
@@ -2315,9 +2320,9 @@ pub const Disassembler = struct {
 
             0b1000, 0b1001, 0b1010, 0b1011, 0b1100, 0b1101, 0b1110, 0b1111 => { // data processing 3 source
                 const width = Width.from(op >> 31);
-                const op54 = @truncate(u2, op >> 29);
-                const op31 = @truncate(u3, op >> 21);
-                const o0 = @truncate(u1, op >> 15);
+                const op54 = @as(u2, @truncate(op >> 29));
+                const op31 = @as(u3, @truncate(op >> 21));
+                const o0 = @as(u1, @truncate(op >> 15));
                 const payload = DataProcInstr{
                     .rm = if (op31 == 0b000)
                         Register.from(op >> 16, width, false)
@@ -2360,16 +2365,16 @@ pub const Disassembler = struct {
     }
 
     fn decodeDataProcScalarFPSIMD(op: u32) Error!Instruction {
-        const op0 = @truncate(u4, op >> 28);
-        const op1 = @truncate(u2, op >> 23);
-        const op2 = @truncate(u4, op >> 19);
-        const op3 = @truncate(u9, op >> 10);
+        const op0 = @as(u4, @truncate(op >> 28));
+        const op1 = @as(u2, @truncate(op >> 23));
+        const op2 = @as(u4, @truncate(op >> 19));
+        const op3 = @as(u9, @truncate(op >> 10));
         // TODO: stage 1 moment
         const ShaOpTy = Field(ShaInstr, .op);
         const AesOpTy = Field(AesInstr, .op);
         // TODO: should be a top return
         if (op0 == 0b0100 and matches(op1, "0b0x") and matches(op2, "0bx101") and matches(op3, "0b00xxxxx10")) {
-            const aes_op = switch (@truncate(u5, op >> 12)) {
+            const aes_op = switch (@as(u5, @truncate(op >> 12))) {
                 0b00100 => AesOpTy.e,
                 0b00101 => AesOpTy.d,
                 0b00110 => AesOpTy.mc,
@@ -2381,12 +2386,12 @@ pub const Disassembler = struct {
                 .rd = Register.from(op, .v, false),
                 .op = aes_op,
             };
-            return if (@truncate(u2, op >> 22) != 0b00)
+            return if (@as(u2, @truncate(op >> 22)) != 0b00)
                 error.Unimplemented
             else
                 Instruction{ .aes = payload };
         } else if (op0 == 0b0101 and matches(op1, "0b0x") and matches(op2, "0bx0xx") and matches(op3, "0bxxx0xxx00")) {
-            const sha_op = switch (@as(u5, @truncate(u2, op >> 22)) << 3 | @truncate(u3, op >> 12)) {
+            const sha_op = switch (@as(u5, @as(u2, @truncate(op >> 22))) << 3 | @as(u3, @truncate(op >> 12))) {
                 0b00000 => ShaOpTy.c,
                 0b00001 => ShaOpTy.p,
                 0b00010 => ShaOpTy.m,
@@ -2416,7 +2421,7 @@ pub const Disassembler = struct {
                 .h, .h2, .su1 => Instruction{ .sha256 = payload },
             };
         } else if (op0 == 0b0101 and matches(op1, "0b0x") and matches(op2, "0bx101") and matches(op3, "0b00xxxxx10")) {
-            const sha_op = switch (@as(u7, @truncate(u2, op >> 22)) << 3 | @truncate(u5, op >> 12)) {
+            const sha_op = switch (@as(u7, @as(u2, @truncate(op >> 22))) << 3 | @as(u5, @truncate(op >> 12))) {
                 0b0000000 => ShaOpTy.h,
                 0b0000001 => ShaOpTy.su1,
                 0b0000010 => ShaOpTy.su0,
@@ -2451,10 +2456,10 @@ pub const Disassembler = struct {
         } else if (matches(op0, "0b01x1") and matches(op1, "0b0x") and matches(op2, "0bx0xx") and matches(op3, "0bxxx1xxxx1")) { // SIMD scalar three same extra
             return error.Unimplemented;
         } else if (matches(op0, "0b01x1") and matches(op1, "0b0x") and matches(op2, "0bx100") and matches(op3, "0b00xxxxx10")) { // SIMD scalar two reg misc
-            const u = @truncate(u1, op >> 29);
-            const size = @truncate(u2, op >> 22);
-            const opcode = @truncate(u5, op >> 12);
-            const sz = @truncate(u1, size);
+            const u = @as(u1, @truncate(op >> 29));
+            const size = @as(u2, @truncate(op >> 22));
+            const opcode = @as(u5, @truncate(op >> 12));
+            const sz = @as(u1, @truncate(size));
             return if (u == 0b0 and opcode == 0b00011)
                 Instruction{ .suqadd = undefined }
             else if (u == 0b0 and opcode == 0b00111)
@@ -2534,10 +2539,10 @@ pub const Disassembler = struct {
                 } };
             } else error.Unallocated;
         } else if (matches(op0, "0b01x1") and matches(op1, "0b0x") and matches(op2, "0bx110") and matches(op3, "0b00xxxxx10")) { // SIMD scalar pairwise
-            const u = @truncate(u1, op >> 29);
-            const size = @truncate(u2, op >> 22);
-            const opcode = @truncate(u5, op >> 12);
-            const sz = @truncate(u1, size);
+            const u = @as(u1, @truncate(op >> 29));
+            const size = @as(u2, @truncate(op >> 22));
+            const opcode = @as(u5, @truncate(op >> 12));
+            const sz = @as(u1, @truncate(size));
             return if (u == 0 and opcode == 0b11011)
                 Instruction{ .addp = SIMDDataProcInstr{
                     .arrangement_a = if (size == 0b11)
@@ -2582,9 +2587,9 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0b01x1") and matches(op1, "0b0x") and matches(op2, "0bx1xx") and matches(op3, "0bxxxxxxx00")) { // SIMD scalar three different
-            const u = @truncate(u1, op >> 29);
-            const size = @truncate(u2, op >> 22);
-            const opcode = @truncate(u4, op >> 12);
+            const u = @as(u1, @truncate(op >> 29));
+            const size = @as(u2, @truncate(op >> 22));
+            const opcode = @as(u4, @truncate(op >> 12));
             const va = if (size == 0b01)
                 Width.s
             else if (size == 0b10)
@@ -2611,10 +2616,10 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0b01x1") and matches(op1, "0b0x") and matches(op2, "0bx1xx") and matches(op3, "0bxxxxxxxx1")) { // SIMD scalar three same
-            const u = @truncate(u1, op >> 29);
-            const size = @truncate(u2, op >> 22);
-            const opcode = @truncate(u5, op >> 11);
-            const sz = @truncate(u1, size);
+            const u = @as(u1, @truncate(op >> 29));
+            const size = @as(u2, @truncate(op >> 22));
+            const opcode = @as(u5, @truncate(op >> 11));
+            const sz = @as(u1, @truncate(size));
             return if (u == 0 and opcode == 0b00001)
                 Instruction{ .sqadd = undefined }
             else if (u == 0 and opcode == 0b00101)
@@ -2691,11 +2696,11 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0b01x1") and matches(op1, "0b10") and matches(op3, "0bxxxxxxxx1")) { // SIMD scalar shift by immediate
-            const u = @truncate(u1, op >> 29);
-            const immh = @truncate(u4, op >> 19);
-            const immb = @truncate(u3, op >> 16);
+            const u = @as(u1, @truncate(op >> 29));
+            const immh = @as(u4, @truncate(op >> 19));
+            const immb = @as(u3, @truncate(op >> 16));
             const immhimmb = @as(u8, immh) << 3 | immb;
-            const opcode = @truncate(u5, op >> 11);
+            const opcode = @as(u5, @truncate(op >> 11));
             return if (u == 0 and !matches(immh, "0b0000") and matches(opcode, "0b00000")) blk: {
                 const v = if (matches(immh, "0b1xxx"))
                     Width.d
@@ -3141,14 +3146,14 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0b01x1") and matches(op1, "0b1x") and matches(op3, "0bxxxxxxxx0")) { // SIMD scalar x indexed element
-            const u = @truncate(u1, op >> 29);
-            const size = @truncate(u2, op >> 22);
-            const l = @truncate(u1, op >> 21);
-            const m = @truncate(u1, op >> 20);
-            const h = @truncate(u1, op >> 11);
-            const sz = @truncate(u1, size);
+            const u = @as(u1, @truncate(op >> 29));
+            const size = @as(u2, @truncate(op >> 22));
+            const l = @as(u1, @truncate(op >> 21));
+            const m = @as(u1, @truncate(op >> 20));
+            const h = @as(u1, @truncate(op >> 11));
+            const sz = @as(u1, @truncate(size));
             const v = if (sz == 0b0) Width.s else Width.d;
-            const opcode = @truncate(u4, op >> 12);
+            const opcode = @as(u4, @truncate(op >> 12));
             return if (u == 0b0 and opcode == 0b0011) blk: {
                 const va = if (size == 0b01)
                     Width.s
@@ -3163,9 +3168,9 @@ pub const Disassembler = struct {
                 else
                     return error.Unallocated;
                 const vm = if (size == 0b01)
-                    @truncate(u4, op >> 16)
+                    @as(u4, @truncate(op >> 16))
                 else if (size == 0b10)
-                    @as(u5, m) << 4 | @truncate(u4, op >> 16)
+                    @as(u5, m) << 4 | @as(u4, @truncate(op >> 16))
                 else
                     return error.Unallocated;
                 break :blk Instruction{ .sqdmlal = SIMDDataProcInstr{
@@ -3199,9 +3204,9 @@ pub const Disassembler = struct {
                 else
                     return error.Unallocated;
                 const vm = if (size == 0b01)
-                    @truncate(u4, op >> 16)
+                    @as(u4, @truncate(op >> 16))
                 else if (size == 0b10)
-                    @as(u5, m) << 4 | @truncate(u4, op >> 16)
+                    @as(u5, m) << 4 | @as(u4, @truncate(op >> 16))
                 else
                     return error.Unallocated;
                 break :blk Instruction{ .sqdmlsl = SIMDDataProcInstr{
@@ -3235,9 +3240,9 @@ pub const Disassembler = struct {
                 else
                     return error.Unallocated;
                 const vm = if (size == 0b01)
-                    @truncate(u4, op >> 16)
+                    @as(u4, @truncate(op >> 16))
                 else if (size == 0b10)
-                    @as(u5, m) << 4 | @truncate(u4, op >> 16)
+                    @as(u5, m) << 4 | @as(u4, @truncate(op >> 16))
                 else
                     return error.Unallocated;
                 break :blk Instruction{ .sqdmull = SIMDDataProcInstr{
@@ -3263,9 +3268,9 @@ pub const Disassembler = struct {
                 else
                     return error.Unallocated;
                 const vm = if (size == 0b01)
-                    @truncate(u4, op >> 16)
+                    @as(u4, @truncate(op >> 16))
                 else if (size == 0b10)
-                    @as(u5, m) << 4 | @truncate(u4, op >> 16)
+                    @as(u5, m) << 4 | @as(u4, @truncate(op >> 16))
                 else
                     return error.Unallocated;
                 break :blk Instruction{ .sqdmulh = SIMDDataProcInstr{
@@ -3291,9 +3296,9 @@ pub const Disassembler = struct {
                 else
                     return error.Unallocated;
                 const vm = if (size == 0b01)
-                    @truncate(u4, op >> 16)
+                    @as(u4, @truncate(op >> 16))
                 else if (size == 0b10)
-                    @as(u5, m) << 4 | @truncate(u4, op >> 16)
+                    @as(u5, m) << 4 | @as(u4, @truncate(op >> 16))
                 else
                     return error.Unallocated;
                 break :blk Instruction{ .sqrdmulh = SIMDDataProcInstr{
@@ -3380,11 +3385,11 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0b0x00") and matches(op1, "0b0x") and matches(op2, "0bx0xx") and matches(op3, "0bxxx0xxx00")) { // SIMD table lookup
-            const q = @truncate(u1, op >> 30);
-            const o2 = @truncate(u2, op >> 22);
-            const len = @truncate(u2, op >> 13);
-            const o = @truncate(u1, op >> 12);
-            const t = @truncate(u5, op >> 5);
+            const q = @as(u1, @truncate(op >> 30));
+            const o2 = @as(u2, @truncate(op >> 22));
+            const len = @as(u2, @truncate(op >> 13));
+            const o = @as(u1, @truncate(op >> 12));
+            const t = @as(u5, @truncate(op >> 5));
             const rt = Register.from(t, .v, false);
             const rt2 = Register.from((t + 1) % 31, .v, false);
             const rt3 = Register.from((t + 2) % 31, .v, false);
@@ -3411,61 +3416,61 @@ pub const Disassembler = struct {
         } else if (matches(op0, "0b0x10") and matches(op1, "0b0x") and matches(op2, "0bx0xx") and matches(op3, "0bxxx0xxxx0")) { // SIMD extract
             return error.Unimplemented;
         } else if (matches(op0, "0b0xx0") and matches(op1, "0b00") and matches(op2, "0b00xx") and matches(op3, "0bxxx0xxxx1")) { // SIMD copy
-            const q = @truncate(u1, op >> 30);
-            const u = @truncate(u1, op >> 29);
-            const imm5 = @truncate(u5, op >> 16);
-            const imm4 = @truncate(u4, op >> 11);
+            const q = @as(u1, @truncate(op >> 30));
+            const u = @as(u1, @truncate(op >> 29));
+            const imm5 = @as(u5, @truncate(op >> 16));
+            const imm4 = @as(u4, @truncate(op >> 11));
             return if (u == 0b0 and imm4 == 0b0000)
                 Instruction{ .dup = SIMDDataProcInstr{
-                    .arrangement_a = if (@truncate(u1, imm5) == 0b1 and q == 0b0)
+                    .arrangement_a = if (@as(u1, @truncate(imm5)) == 0b1 and q == 0b0)
                         SIMDArrangement.@"8b"
-                    else if (@truncate(u1, imm5) == 0b1 and q == 0b1)
+                    else if (@as(u1, @truncate(imm5)) == 0b1 and q == 0b1)
                         SIMDArrangement.@"16b"
-                    else if (@truncate(u2, imm5) == 0b10 and q == 0b0)
+                    else if (@as(u2, @truncate(imm5)) == 0b10 and q == 0b0)
                         SIMDArrangement.@"4h"
-                    else if (@truncate(u2, imm5) == 0b10 and q == 0b1)
+                    else if (@as(u2, @truncate(imm5)) == 0b10 and q == 0b1)
                         SIMDArrangement.@"8h"
-                    else if (@truncate(u3, imm5) == 0b100 and q == 0b0)
+                    else if (@as(u3, @truncate(imm5)) == 0b100 and q == 0b0)
                         SIMDArrangement.@"2s"
-                    else if (@truncate(u3, imm5) == 0b100 and q == 0b1)
+                    else if (@as(u3, @truncate(imm5)) == 0b100 and q == 0b1)
                         SIMDArrangement.@"4s"
-                    else if (@truncate(u4, imm5) == 0b1000 and q == 0b1)
+                    else if (@as(u4, @truncate(imm5)) == 0b1000 and q == 0b1)
                         SIMDArrangement.@"2d"
                     else
                         return error.Unallocated,
                     .rn = Register.from(op >> 5, Width.v, false),
                     .rd = Register.from(op, Width.v, false),
-                    .post_index = if (@truncate(u1, imm5) == 0b1)
-                        @truncate(u4, imm5 >> 1)
-                    else if (@truncate(u2, imm5) == 0b10)
-                        @truncate(u3, imm5 >> 2)
-                    else if (@truncate(u3, imm5) == 0b100)
-                        @truncate(u2, imm5 >> 3)
-                    else if (@truncate(u4, imm5) == 0b1000)
-                        @truncate(u1, imm5 >> 4)
+                    .post_index = if (@as(u1, @truncate(imm5)) == 0b1)
+                        @as(u4, @truncate(imm5 >> 1))
+                    else if (@as(u2, @truncate(imm5)) == 0b10)
+                        @as(u3, @truncate(imm5 >> 2))
+                    else if (@as(u3, @truncate(imm5)) == 0b100)
+                        @as(u2, @truncate(imm5 >> 3))
+                    else if (@as(u4, @truncate(imm5)) == 0b1000)
+                        @as(u1, @truncate(imm5 >> 4))
                     else
                         return error.Unallocated,
                 } }
             else if (u == 0b0 and imm4 == 0b0001) blk: {
-                const width = if (@truncate(u1, imm5) == 0b1 or
-                    @truncate(u2, imm5) == 0b10 or
-                    @truncate(u3, imm5) == 0b100)
+                const width = if (@as(u1, @truncate(imm5)) == 0b1 or
+                    @as(u2, @truncate(imm5)) == 0b10 or
+                    @as(u3, @truncate(imm5)) == 0b100)
                     Width.w
-                else if (@truncate(u4, imm5) == 0b1000) Width.x else return error.Unallocated;
+                else if (@as(u4, @truncate(imm5)) == 0b1000) Width.x else return error.Unallocated;
                 break :blk Instruction{ .dup = SIMDDataProcInstr{
-                    .arrangement_a = if (@truncate(u1, imm5) == 0b1 and q == 0b0)
+                    .arrangement_a = if (@as(u1, @truncate(imm5)) == 0b1 and q == 0b0)
                         SIMDArrangement.@"8b"
-                    else if (@truncate(u1, imm5) == 0b1 and q == 0b1)
+                    else if (@as(u1, @truncate(imm5)) == 0b1 and q == 0b1)
                         SIMDArrangement.@"16b"
-                    else if (@truncate(u2, imm5) == 0b10 and q == 0b0)
+                    else if (@as(u2, @truncate(imm5)) == 0b10 and q == 0b0)
                         SIMDArrangement.@"4h"
-                    else if (@truncate(u2, imm5) == 0b10 and q == 0b1)
+                    else if (@as(u2, @truncate(imm5)) == 0b10 and q == 0b1)
                         SIMDArrangement.@"8h"
-                    else if (@truncate(u3, imm5) == 0b100 and q == 0b0)
+                    else if (@as(u3, @truncate(imm5)) == 0b100 and q == 0b0)
                         SIMDArrangement.@"2s"
-                    else if (@truncate(u3, imm5) == 0b100 and q == 0b1)
+                    else if (@as(u3, @truncate(imm5)) == 0b100 and q == 0b1)
                         SIMDArrangement.@"4s"
-                    else if (@truncate(u4, imm5) == 0b1000 and q == 0b1)
+                    else if (@as(u4, @truncate(imm5)) == 0b1000 and q == 0b1)
                         SIMDArrangement.@"2d"
                     else
                         return error.Unallocated,
@@ -3475,103 +3480,103 @@ pub const Disassembler = struct {
             } else if (u == 0b0 and imm4 == 0b0101) blk: {
                 const width = if (q == 0b0) Width.w else Width.x;
                 break :blk Instruction{ .smov = SIMDDataProcInstr{
-                    .arrangement_a = if (@truncate(u1, imm5) == 0b1)
+                    .arrangement_a = if (@as(u1, @truncate(imm5)) == 0b1)
                         SIMDArrangement.b
-                    else if (@truncate(u2, imm5) == 0b10)
+                    else if (@as(u2, @truncate(imm5)) == 0b10)
                         SIMDArrangement.h
-                    else if (width == .x and @truncate(u3, imm5) == 0b100)
+                    else if (width == .x and @as(u3, @truncate(imm5)) == 0b100)
                         SIMDArrangement.s
                     else
                         return error.Unallocated,
                     .rn = Register.from(op >> 5, .v, false),
                     .rd = Register.from(op, width, false),
-                    .post_index = if (@truncate(u1, imm5) == 0b1)
-                        @truncate(u4, imm5 >> 1)
-                    else if (@truncate(u2, imm5) == 0b10)
-                        @truncate(u3, imm5 >> 2)
-                    else if (width == .x and @truncate(u3, imm5) == 0b100)
-                        @truncate(u2, imm5 >> 3)
+                    .post_index = if (@as(u1, @truncate(imm5)) == 0b1)
+                        @as(u4, @truncate(imm5 >> 1))
+                    else if (@as(u2, @truncate(imm5)) == 0b10)
+                        @as(u3, @truncate(imm5 >> 2))
+                    else if (width == .x and @as(u3, @truncate(imm5)) == 0b100)
+                        @as(u2, @truncate(imm5 >> 3))
                     else
                         return error.Unallocated,
                 } };
-            } else if ((q == 0b0 or (q == 0b1 and @truncate(u4, imm5) == 0b1000)) and
+            } else if ((q == 0b0 or (q == 0b1 and @as(u4, @truncate(imm5)) == 0b1000)) and
                 u == 0b0 and imm4 == 0b0111)
             blk: {
                 const width = if (q == 0b0) Width.w else Width.x;
                 const payload = SIMDDataProcInstr{
-                    .arrangement_a = if (width == .w and @truncate(u1, imm5) == 0b1)
+                    .arrangement_a = if (width == .w and @as(u1, @truncate(imm5)) == 0b1)
                         SIMDArrangement.b
-                    else if (width == .w and @truncate(u2, imm5) == 0b10)
+                    else if (width == .w and @as(u2, @truncate(imm5)) == 0b10)
                         SIMDArrangement.h
-                    else if (width == .w and @truncate(u3, imm5) == 0b100)
+                    else if (width == .w and @as(u3, @truncate(imm5)) == 0b100)
                         SIMDArrangement.s
-                    else if (width == .x and @truncate(u4, imm5) == 0b1000)
+                    else if (width == .x and @as(u4, @truncate(imm5)) == 0b1000)
                         SIMDArrangement.d
                     else
                         return error.Unallocated,
                     .rn = Register.from(op >> 5, .v, false),
                     .rd = Register.from(op, width, false),
-                    .post_index = if (width == .w and @truncate(u1, imm5) == 0b1)
-                        @truncate(u4, imm5 >> 1)
-                    else if (width == .w and @truncate(u2, imm5) == 0b10)
-                        @truncate(u3, imm5 >> 2)
-                    else if (width == .w and @truncate(u3, imm5) == 0b100)
-                        @truncate(u2, imm5 >> 3)
-                    else if (width == .x and @truncate(u4, imm5) == 0b1000)
-                        @truncate(u1, imm5 >> 4)
+                    .post_index = if (width == .w and @as(u1, @truncate(imm5)) == 0b1)
+                        @as(u4, @truncate(imm5 >> 1))
+                    else if (width == .w and @as(u2, @truncate(imm5)) == 0b10)
+                        @as(u3, @truncate(imm5 >> 2))
+                    else if (width == .w and @as(u3, @truncate(imm5)) == 0b100)
+                        @as(u2, @truncate(imm5 >> 3))
+                    else if (width == .x and @as(u4, @truncate(imm5)) == 0b1000)
+                        @as(u1, @truncate(imm5 >> 4))
                     else
                         return error.Unallocated,
                 };
-                break :blk if ((width == .w and @truncate(u3, imm5) == 0b100) or
-                    (width == .x and @truncate(u4, imm5) == 0b1000))
+                break :blk if ((width == .w and @as(u3, @truncate(imm5)) == 0b100) or
+                    (width == .x and @as(u4, @truncate(imm5)) == 0b1000))
                     Instruction{ .vector_mov = payload }
                 else
                     Instruction{ .umov = payload };
             } else if (q == 0b1 and (u == 0b1 or (u == 0b0 and imm4 == 0b0011))) blk: {
                 const width = if (u == 0b1)
                     Width.v
-                else if (@truncate(u1, imm5) == 0b1)
+                else if (@as(u1, @truncate(imm5)) == 0b1)
                     Width.w
-                else if (@truncate(u2, imm5) == 0b10)
+                else if (@as(u2, @truncate(imm5)) == 0b10)
                     Width.w
-                else if (@truncate(u3, imm5) == 0b100)
+                else if (@as(u3, @truncate(imm5)) == 0b100)
                     Width.w
-                else if (@truncate(u4, imm5) == 0b1000)
+                else if (@as(u4, @truncate(imm5)) == 0b1000)
                     Width.x
                 else
                     return error.Unallocated;
                 break :blk Instruction{ .ins = SIMDDataProcInstr{
-                    .arrangement_a = if (@truncate(u1, imm5) == 0b1)
+                    .arrangement_a = if (@as(u1, @truncate(imm5)) == 0b1)
                         SIMDArrangement.b
-                    else if (@truncate(u2, imm5) == 0b10)
+                    else if (@as(u2, @truncate(imm5)) == 0b10)
                         SIMDArrangement.h
-                    else if (@truncate(u3, imm5) == 0b100)
+                    else if (@as(u3, @truncate(imm5)) == 0b100)
                         SIMDArrangement.s
-                    else if (@truncate(u4, imm5) == 0b1000)
+                    else if (@as(u4, @truncate(imm5)) == 0b1000)
                         SIMDArrangement.d
                     else
                         undefined,
-                    .index = if (@truncate(u1, imm5) == 0b1)
-                        @truncate(u4, imm5 >> 1)
-                    else if (@truncate(u2, imm5) == 0b10)
-                        @truncate(u3, imm5 >> 2)
-                    else if (@truncate(u3, imm5) == 0b100)
-                        @truncate(u2, imm5 >> 3)
-                    else if (@truncate(u4, imm5) == 0b1000)
-                        @truncate(u1, imm5 >> 4)
+                    .index = if (@as(u1, @truncate(imm5)) == 0b1)
+                        @as(u4, @truncate(imm5 >> 1))
+                    else if (@as(u2, @truncate(imm5)) == 0b10)
+                        @as(u3, @truncate(imm5 >> 2))
+                    else if (@as(u3, @truncate(imm5)) == 0b100)
+                        @as(u2, @truncate(imm5 >> 3))
+                    else if (@as(u4, @truncate(imm5)) == 0b1000)
+                        @as(u1, @truncate(imm5 >> 4))
                     else
                         undefined,
                     .rn = Register.from(op >> 5, width, false),
                     .rd = Register.from(op, .v, false),
                     .post_index = if (u == 0b1)
-                        if (@truncate(u1, imm5) == 0b1)
+                        if (@as(u1, @truncate(imm5)) == 0b1)
                             imm4
-                        else if (@truncate(u2, imm5) == 0b10)
-                            @truncate(u3, imm4 >> 1)
-                        else if (@truncate(u3, imm5) == 0b100)
-                            @truncate(u2, imm4 >> 2)
-                        else if (@truncate(u4, imm5) == 0b1000)
-                            @truncate(u1, imm4 >> 3)
+                        else if (@as(u2, @truncate(imm5)) == 0b10)
+                            @as(u3, @truncate(imm4 >> 1))
+                        else if (@as(u3, @truncate(imm5)) == 0b100)
+                            @as(u2, @truncate(imm4 >> 2))
+                        else if (@as(u4, @truncate(imm5)) == 0b1000)
+                            @as(u1, @truncate(imm4 >> 3))
                         else
                             undefined
                     else
@@ -3585,17 +3590,17 @@ pub const Disassembler = struct {
         } else if (matches(op0, "0b0xx0") and matches(op1, "0b0x") and matches(op2, "0bx0xx") and matches(op3, "0bxxx1xxxx1")) { // SIMD three reg extension
             return error.Unimplemented;
         } else if (matches(op0, "0b0xx0") and matches(op1, "0b0x") and matches(op2, "0bx100") and matches(op3, "0b00xxxxx10")) { // SIMD two reg misc
-            const u = @truncate(u1, op >> 29);
-            const size = @truncate(u2, op >> 22);
-            const opcode = @truncate(u5, op >> 12);
-            const q = @truncate(u1, op >> 30);
+            const u = @as(u1, @truncate(op >> 29));
+            const size = @as(u2, @truncate(op >> 22));
+            const opcode = @as(u5, @truncate(op >> 12));
+            const q = @as(u1, @truncate(op >> 30));
             const sizeq = @as(u3, size) << 1 | q;
             const rn = Register.from(op >> 5, .v, false);
             const rd = Register.from(op, .v, false);
             return if (u == 0b0 and opcode == 0b00000) // SIMD two reg misc
                 Instruction{ .rev64 = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -3632,7 +3637,7 @@ pub const Disassembler = struct {
             else if (u == 0b0 and opcode == 0b00011)
                 Instruction{ .suqadd = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -3641,7 +3646,7 @@ pub const Disassembler = struct {
             else if (u == 0b0 and opcode == 0b00100)
                 Instruction{ .vector_cls = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -3678,7 +3683,7 @@ pub const Disassembler = struct {
             else if (u == 0b0 and opcode == 0b00111)
                 Instruction{ .sqabs = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -3687,7 +3692,7 @@ pub const Disassembler = struct {
             else if (u == 0b0 and opcode == 0b01000)
                 Instruction{ .cmgt = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -3697,7 +3702,7 @@ pub const Disassembler = struct {
             else if (u == 0b0 and opcode == 0b01001)
                 Instruction{ .cmeq = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -3707,7 +3712,7 @@ pub const Disassembler = struct {
             else if (u == 0b0 and opcode == 0b01010)
                 Instruction{ .cmlt = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -3717,7 +3722,7 @@ pub const Disassembler = struct {
             else if (u == 0b0 and opcode == 0b01011)
                 Instruction{ .abs = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -3727,7 +3732,7 @@ pub const Disassembler = struct {
                 Instruction{ .xtn = SIMDDataProcInstr{
                     .q = q == 0b1,
                     .arrangement_a = if (sizeq <= 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -3737,7 +3742,7 @@ pub const Disassembler = struct {
                 Instruction{ .sqxtn = SIMDDataProcInstr{
                     .q = q == 0b1,
                     .arrangement_a = if (sizeq <= 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -4029,7 +4034,7 @@ pub const Disassembler = struct {
             else if (u == 0b1 and opcode == 0b00000)
                 Instruction{ .vector_rev32 = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -4057,7 +4062,7 @@ pub const Disassembler = struct {
             else if (u == 0b1 and opcode == 0b00011)
                 Instruction{ .usqadd = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -4066,7 +4071,7 @@ pub const Disassembler = struct {
             else if (u == 0b1 and opcode == 0b00100)
                 Instruction{ .vector_clz = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -4094,7 +4099,7 @@ pub const Disassembler = struct {
             else if (u == 0b1 and opcode == 0b00111)
                 Instruction{ .sqneg = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -4103,7 +4108,7 @@ pub const Disassembler = struct {
             else if (u == 0b1 and opcode == 0b01000)
                 Instruction{ .cmge = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -4113,7 +4118,7 @@ pub const Disassembler = struct {
             else if (u == 0b1 and opcode == 0b01001)
                 Instruction{ .cmle = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -4123,7 +4128,7 @@ pub const Disassembler = struct {
             else if (u == 0b1 and opcode == 0b01011)
                 Instruction{ .neg = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -4133,7 +4138,7 @@ pub const Disassembler = struct {
                 Instruction{ .sqxtun = SIMDDataProcInstr{
                     .q = q == 0b1,
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -4167,7 +4172,7 @@ pub const Disassembler = struct {
                 Instruction{ .uqxtn = SIMDDataProcInstr{
                     .q = q == 0b1,
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = rn,
@@ -4431,10 +4436,10 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0b0xx0") and matches(op1, "0b0x") and matches(op2, "0bx110") and matches(op3, "0b00xxxxx10")) { // SIMD across lanes
-            const u = @truncate(u1, op >> 29);
-            const size = @truncate(u2, op >> 22);
-            const opcode = @truncate(u5, op >> 12);
-            const q = @truncate(u1, op >> 30);
+            const u = @as(u1, @truncate(op >> 29));
+            const size = @as(u2, @truncate(op >> 22));
+            const opcode = @as(u5, @truncate(op >> 12));
+            const q = @as(u1, @truncate(op >> 30));
             const sizeq = @as(u3, size) << 1 | q;
             return if (u == 0 and opcode == 0b00011)
                 @as(Instruction, Instruction.saddlv)
@@ -4453,7 +4458,7 @@ pub const Disassembler = struct {
                     return error.Unallocated;
                 break :blk Instruction{ .addv = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b100)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rn = Register.from(op >> 5, Width.v, false),
@@ -4484,10 +4489,10 @@ pub const Disassembler = struct {
             else
                 error.Unimplemented;
         } else if (matches(op0, "0b0xx0") and matches(op1, "0b0x") and matches(op2, "0bx1xx") and matches(op3, "0bxxxxxxx00")) { // SIMD three different
-            const u = @truncate(u1, op >> 29);
-            const opcode = @truncate(u4, op >> 12);
-            const size = @truncate(u2, op >> 22);
-            const q = @truncate(u1, op >> 30);
+            const u = @as(u1, @truncate(op >> 29));
+            const opcode = @as(u4, @truncate(op >> 12));
+            const size = @as(u2, @truncate(op >> 22));
+            const q = @as(u1, @truncate(op >> 30));
             const sizeq = @as(u3, size) << 1 | q;
             return if (u == 0 and opcode == 0b0000)
                 @as(Instruction, Instruction.saddl)
@@ -4499,9 +4504,9 @@ pub const Disassembler = struct {
                 @as(Instruction, Instruction.ssubw)
             else if (u == 0 and opcode == 0b0100)
                 Instruction{ .addhn = SIMDDataProcInstr{
-                    .q = @truncate(u1, op >> 30) == 1,
+                    .q = @as(u1, @truncate(op >> 30)) == 1,
                     .arrangement_a = if (size != 0b11)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = Register.from(op >> 16, .v, false),
@@ -4590,10 +4595,10 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0b0xx0") and matches(op1, "0b0x") and matches(op2, "0bx1xx") and matches(op3, "0bxxxxxxxx1")) { // SIMD three same
-            const u = @truncate(u1, op >> 29);
-            const size = @truncate(u2, op >> 22);
-            const opcode = @truncate(u5, op >> 11);
-            const q = @truncate(u1, op >> 30);
+            const u = @as(u1, @truncate(op >> 29));
+            const size = @as(u2, @truncate(op >> 22));
+            const opcode = @as(u5, @truncate(op >> 11));
+            const q = @as(u1, @truncate(op >> 30));
             const sizeq = @as(u3, size) << 1 | q;
             const rm = Register.from(op >> 16, .v, false);
             const rn = Register.from(op >> 5, .v, false);
@@ -4601,7 +4606,7 @@ pub const Disassembler = struct {
             return if (u == 0 and opcode == 0b00000)
                 Instruction{ .shadd = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4611,7 +4616,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b00001)
                 Instruction{ .sqadd = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4621,7 +4626,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b00010)
                 Instruction{ .srhadd = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4631,7 +4636,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b00100)
                 Instruction{ .shsub = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4641,7 +4646,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b00101)
                 Instruction{ .sqsub = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4651,7 +4656,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b00110)
                 Instruction{ .cmgt = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4661,7 +4666,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b00111)
                 Instruction{ .cmge = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4671,7 +4676,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b01000)
                 Instruction{ .sshl = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4681,7 +4686,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b01001)
                 Instruction{ .sqshl = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4691,7 +4696,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b01010)
                 Instruction{ .srshl = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4701,7 +4706,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b01011)
                 Instruction{ .sqrshl = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4711,7 +4716,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b01100)
                 Instruction{ .smax = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4721,7 +4726,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b01101)
                 Instruction{ .smin = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4731,7 +4736,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b01110)
                 Instruction{ .sabd = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4741,7 +4746,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b01111)
                 Instruction{ .saba = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4751,7 +4756,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b10000)
                 Instruction{ .vector_add = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4761,7 +4766,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b10001)
                 Instruction{ .cmtst = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4771,7 +4776,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b10010)
                 Instruction{ .mla = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4781,7 +4786,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b10011)
                 Instruction{ .mul = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4791,7 +4796,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b10100)
                 Instruction{ .smaxp = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4801,7 +4806,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b10101)
                 Instruction{ .sminp = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4811,7 +4816,7 @@ pub const Disassembler = struct {
             else if (u == 0 and opcode == 0b10110)
                 Instruction{ .sqdmulh = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq > 0b001 and sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -4820,9 +4825,9 @@ pub const Disassembler = struct {
                 } }
             else if (u == 0 and opcode == 0b10111)
                 Instruction{ .addp = SIMDDataProcInstr{
-                    .q = @truncate(u1, op >> 30) == 1,
+                    .q = @as(u1, @truncate(op >> 30)) == 1,
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5048,7 +5053,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b00000)
                 Instruction{ .uhadd = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5058,7 +5063,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b00001)
                 Instruction{ .uqadd = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5068,7 +5073,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b00010)
                 Instruction{ .urhadd = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5078,7 +5083,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b00100)
                 Instruction{ .uhsub = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5088,7 +5093,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b00101)
                 Instruction{ .uqsub = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5098,7 +5103,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b00110)
                 Instruction{ .cmhi = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5108,7 +5113,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b00111)
                 Instruction{ .cmhs = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5118,7 +5123,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b01000)
                 Instruction{ .ushl = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5128,7 +5133,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b01001)
                 Instruction{ .uqshl = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5138,7 +5143,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b01010)
                 Instruction{ .urshl = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5148,7 +5153,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b01011)
                 Instruction{ .uqrshl = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5158,7 +5163,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b01100)
                 Instruction{ .umax = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5168,7 +5173,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b01101)
                 Instruction{ .umin = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5178,7 +5183,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b01110)
                 Instruction{ .uabd = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5188,7 +5193,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b01111)
                 Instruction{ .uaba = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5198,7 +5203,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b10000)
                 Instruction{ .vector_sub = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5208,7 +5213,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b10001)
                 Instruction{ .cmeq = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5218,7 +5223,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b10010)
                 Instruction{ .mls = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5238,7 +5243,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b10100)
                 Instruction{ .umaxp = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5248,7 +5253,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b10101)
                 Instruction{ .uminp = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5258,7 +5263,7 @@ pub const Disassembler = struct {
             else if (u == 1 and opcode == 0b10110)
                 Instruction{ .sqrdmulh = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq > 0b001 and sizeq < 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5402,7 +5407,7 @@ pub const Disassembler = struct {
             else if (u == 1 and size >= 0b10 and opcode == 0b11010)
                 Instruction{ .fabd = SIMDDataProcInstr{
                     .arrangement_a = if (sizeq != 0b110)
-                        @intToEnum(SIMDArrangement, sizeq)
+                        @enumFromInt(sizeq)
                     else
                         return error.Unallocated,
                     .rm = rm,
@@ -5476,19 +5481,19 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0b0xx0") and matches(op1, "0b10") and matches(op2, "0b0000") and matches(op3, "0bxxxxxxxx1")) { // SIMD modified immediate
-            const q = @truncate(u1, op >> 30);
-            const o1 = @truncate(u1, op >> 29);
-            const cmode = @truncate(u4, op >> 12);
-            const o2 = @truncate(u1, op >> 11);
+            const q = @as(u1, @truncate(op >> 30));
+            const o1 = @as(u1, @truncate(op >> 29));
+            const cmode = @as(u4, @truncate(op >> 12));
+            const o2 = @as(u1, @truncate(op >> 11));
             const rd = Register.from(op, .v, false);
-            const a = @truncate(u1, op >> 18);
-            const b = @truncate(u1, op >> 17);
-            const c = @truncate(u1, op >> 16);
-            const d = @truncate(u1, op >> 9);
-            const e = @truncate(u1, op >> 8);
-            const f = @truncate(u1, op >> 7);
-            const g = @truncate(u1, op >> 6);
-            const h = @truncate(u1, op >> 5);
+            const a = @as(u1, @truncate(op >> 18));
+            const b = @as(u1, @truncate(op >> 17));
+            const c = @as(u1, @truncate(op >> 16));
+            const d = @as(u1, @truncate(op >> 9));
+            const e = @as(u1, @truncate(op >> 8));
+            const f = @as(u1, @truncate(op >> 7));
+            const g = @as(u1, @truncate(op >> 6));
+            const h = @as(u1, @truncate(op >> 5));
             const imm8 = @as(u8, a) << 7 | @as(u8, b) << 6 |
                 @as(u8, c) << 5 | @as(u8, d) << 4 |
                 @as(u8, e) << 3 | @as(u8, f) << 2 |
@@ -5497,8 +5502,8 @@ pub const Disassembler = struct {
                 @as(u64, c) * 0x00F00000 | @as(u64, d) * 0x000F0000 |
                 @as(u64, e) * 0x0000F000 | @as(u64, f) * 0x00000F00 |
                 @as(u64, g) * 0x000000F0 | @as(u64, h) * 0x0000000F;
-            return if (o1 == 0b0 and @truncate(u1, cmode >> 3) == 0b0 and
-                @truncate(u1, cmode) == 0b0 and o2 == 0b0)
+            return if (o1 == 0b0 and @as(u1, @truncate(cmode >> 3)) == 0b0 and
+                @as(u1, @truncate(cmode)) == 0b0 and o2 == 0b0)
                 Instruction{ .movi = SIMDDataProcInstr{
                     .arrangement_a = if (q == 0b0)
                         SIMDArrangement.@"2s"
@@ -5506,13 +5511,13 @@ pub const Disassembler = struct {
                         SIMDArrangement.@"4s",
                     .rd = rd,
                     .payload = .{ .shifted_imm = .{
-                        .shift = @as(u6, @truncate(u2, cmode >> 1)) * 8,
+                        .shift = @as(u6, @as(u2, @truncate(cmode >> 1))) * 8,
                         .shift_ty = .lsl,
                         .imm = imm8,
                     } },
                 } }
-            else if (o1 == 0b0 and @truncate(u1, cmode >> 3) == 0b0 and
-                @truncate(u1, cmode) == 0b1 and o2 == 0b0)
+            else if (o1 == 0b0 and @as(u1, @truncate(cmode >> 3)) == 0b0 and
+                @as(u1, @truncate(cmode)) == 0b1 and o2 == 0b0)
                 Instruction{ .vector_orr = SIMDDataProcInstr{
                     .arrangement_a = if (q == 0b0)
                         SIMDArrangement.@"2s"
@@ -5520,13 +5525,13 @@ pub const Disassembler = struct {
                         SIMDArrangement.@"4s",
                     .rd = rd,
                     .payload = .{ .shifted_imm = .{
-                        .shift = @as(u6, @truncate(u2, cmode >> 1)) * 8,
+                        .shift = @as(u6, @as(u2, @truncate(cmode >> 1))) * 8,
                         .shift_ty = .lsl,
                         .imm = imm8,
                     } },
                 } }
-            else if (o1 == 0b0 and @truncate(u2, cmode >> 2) == 0b10 and
-                @truncate(u1, cmode) == 0b0 and o2 == 0b0)
+            else if (o1 == 0b0 and @as(u2, @truncate(cmode >> 2)) == 0b10 and
+                @as(u1, @truncate(cmode)) == 0b0 and o2 == 0b0)
                 Instruction{ .movi = SIMDDataProcInstr{
                     .arrangement_a = if (q == 0b0)
                         SIMDArrangement.@"4h"
@@ -5534,13 +5539,13 @@ pub const Disassembler = struct {
                         SIMDArrangement.@"8h",
                     .rd = rd,
                     .payload = .{ .shifted_imm = .{
-                        .shift = @as(u6, @truncate(u1, cmode >> 1)) * 8,
+                        .shift = @as(u6, @as(u1, @truncate(cmode >> 1))) * 8,
                         .shift_ty = .lsl,
                         .imm = imm8,
                     } },
                 } }
-            else if (o1 == 0b0 and @truncate(u2, cmode >> 2) == 0b10 and
-                @truncate(u1, cmode) == 0b1 and o2 == 0b0)
+            else if (o1 == 0b0 and @as(u2, @truncate(cmode >> 2)) == 0b10 and
+                @as(u1, @truncate(cmode)) == 0b1 and o2 == 0b0)
                 Instruction{ .vector_orr = SIMDDataProcInstr{
                     .arrangement_a = if (q == 0b0)
                         SIMDArrangement.@"4h"
@@ -5548,12 +5553,12 @@ pub const Disassembler = struct {
                         SIMDArrangement.@"8h",
                     .rd = rd,
                     .payload = .{ .shifted_imm = .{
-                        .shift = @as(u6, @truncate(u1, cmode >> 1)) * 8,
+                        .shift = @as(u6, @as(u1, @truncate(cmode >> 1))) * 8,
                         .shift_ty = .lsl,
                         .imm = imm8,
                     } },
                 } }
-            else if (o1 == 0b0 and @truncate(u3, cmode >> 1) == 0b110 and o2 == 0b0)
+            else if (o1 == 0b0 and @as(u3, @truncate(cmode >> 1)) == 0b110 and o2 == 0b0)
                 Instruction{ .movi = SIMDDataProcInstr{
                     .arrangement_a = if (q == 0b0)
                         SIMDArrangement.@"8b"
@@ -5561,7 +5566,7 @@ pub const Disassembler = struct {
                         SIMDArrangement.@"16b",
                     .rd = rd,
                     .payload = .{ .shifted_imm = .{
-                        .shift = (@as(u6, @truncate(u1, cmode)) + 1) * 8,
+                        .shift = (@as(u6, @as(u1, @truncate(cmode))) + 1) * 8,
                         .shift_ty = .msl,
                         .imm = imm8,
                     } },
@@ -5586,7 +5591,7 @@ pub const Disassembler = struct {
                     else
                         SIMDArrangement.@"4s",
                     .rd = rd,
-                    .payload = .{ .fp_imm = @floatCast(f64, toFloatingPointConst(f32, a, b, c, d, e, f, g, h)) },
+                    .payload = .{ .fp_imm = @as(f64, @floatCast(toFloatingPointConst(f32, a, b, c, d, e, f, g, h))) },
                 } }
             else if (o1 == 0b0 and cmode == 0b1111 and o2 == 0b1)
                 Instruction{ .vector_fmov = SIMDDataProcInstr{
@@ -5595,10 +5600,10 @@ pub const Disassembler = struct {
                     else
                         SIMDArrangement.@"8h",
                     .rd = rd,
-                    .payload = .{ .fp_imm = @floatCast(f64, toFloatingPointConst(f16, a, b, c, d, e, f, g, h)) },
+                    .payload = .{ .fp_imm = @as(f64, @floatCast(toFloatingPointConst(f16, a, b, c, d, e, f, g, h))) },
                 } }
-            else if (o1 == 0b1 and @truncate(u1, cmode >> 3) == 0b0 and
-                @truncate(u1, cmode) == 0b0 and o2 == 0b0)
+            else if (o1 == 0b1 and @as(u1, @truncate(cmode >> 3)) == 0b0 and
+                @as(u1, @truncate(cmode)) == 0b0 and o2 == 0b0)
                 Instruction{ .mvni = SIMDDataProcInstr{
                     .arrangement_a = if (q == 0b0)
                         SIMDArrangement.@"2s"
@@ -5606,13 +5611,13 @@ pub const Disassembler = struct {
                         SIMDArrangement.@"4s",
                     .rd = rd,
                     .payload = .{ .shifted_imm = .{
-                        .shift = @as(u6, @truncate(u2, cmode >> 1)) * 8,
+                        .shift = @as(u6, @as(u2, @truncate(cmode >> 1))) * 8,
                         .shift_ty = .lsl,
                         .imm = imm8,
                     } },
                 } }
-            else if (o1 == 0b1 and @truncate(u1, cmode >> 3) == 0b0 and
-                @truncate(u1, cmode) == 0b1 and o2 == 0b0)
+            else if (o1 == 0b1 and @as(u1, @truncate(cmode >> 3)) == 0b0 and
+                @as(u1, @truncate(cmode)) == 0b1 and o2 == 0b0)
                 Instruction{ .vector_bic = SIMDDataProcInstr{
                     .arrangement_a = if (q == 0b0)
                         SIMDArrangement.@"2s"
@@ -5620,13 +5625,13 @@ pub const Disassembler = struct {
                         SIMDArrangement.@"4s",
                     .rd = rd,
                     .payload = .{ .shifted_imm = .{
-                        .shift = @as(u6, @truncate(u2, cmode >> 1)) * 8,
+                        .shift = @as(u6, @as(u2, @truncate(cmode >> 1))) * 8,
                         .shift_ty = .lsl,
                         .imm = imm8,
                     } },
                 } }
-            else if (o1 == 0b1 and @truncate(u2, cmode >> 2) == 0b10 and
-                @truncate(u1, cmode) == 0b0 and o2 == 0b0)
+            else if (o1 == 0b1 and @as(u2, @truncate(cmode >> 2)) == 0b10 and
+                @as(u1, @truncate(cmode)) == 0b0 and o2 == 0b0)
                 Instruction{ .mvni = SIMDDataProcInstr{
                     .arrangement_a = if (q == 0b0)
                         SIMDArrangement.@"4h"
@@ -5634,13 +5639,13 @@ pub const Disassembler = struct {
                         SIMDArrangement.@"8h",
                     .rd = rd,
                     .payload = .{ .shifted_imm = .{
-                        .shift = @as(u6, @truncate(u1, cmode >> 1)) * 8,
+                        .shift = @as(u6, @as(u1, @truncate(cmode >> 1))) * 8,
                         .shift_ty = .lsl,
                         .imm = imm8,
                     } },
                 } }
-            else if (o1 == 0b1 and @truncate(u2, cmode >> 2) == 0b10 and
-                @truncate(u1, cmode) == 0b1 and o2 == 0b0)
+            else if (o1 == 0b1 and @as(u2, @truncate(cmode >> 2)) == 0b10 and
+                @as(u1, @truncate(cmode)) == 0b1 and o2 == 0b0)
                 Instruction{ .vector_bic = SIMDDataProcInstr{
                     .arrangement_a = if (q == 0b0)
                         SIMDArrangement.@"4h"
@@ -5648,12 +5653,12 @@ pub const Disassembler = struct {
                         SIMDArrangement.@"8h",
                     .rd = rd,
                     .payload = .{ .shifted_imm = .{
-                        .shift = @as(u6, @truncate(u1, cmode >> 1)) * 8,
+                        .shift = @as(u6, @as(u1, @truncate(cmode >> 1))) * 8,
                         .shift_ty = .lsl,
                         .imm = imm8,
                     } },
                 } }
-            else if (o1 == 0b1 and @truncate(u3, cmode >> 1) == 0b110 and o2 == 0b0)
+            else if (o1 == 0b1 and @as(u3, @truncate(cmode >> 1)) == 0b110 and o2 == 0b0)
                 Instruction{ .mvni = SIMDDataProcInstr{
                     .arrangement_a = if (q == 0b0)
                         SIMDArrangement.@"2s"
@@ -5661,7 +5666,7 @@ pub const Disassembler = struct {
                         SIMDArrangement.@"4s",
                     .rd = rd,
                     .payload = .{ .shifted_imm = .{
-                        .shift = (@as(u6, @truncate(u1, cmode)) + 1) * 8,
+                        .shift = (@as(u6, @as(u1, @truncate(cmode))) + 1) * 8,
                         .shift_ty = .msl,
                         .imm = imm8,
                     } },
@@ -5686,11 +5691,11 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0b0xx0") and matches(op1, "0b10") and !matches(op2, "0b0000") and matches(op3, "0bxxxxxxxx1")) { // SIMD shift by immediate
-            const q = @truncate(u1, op >> 30);
-            const u = @truncate(u1, op >> 29);
-            const opcode = @truncate(u5, op >> 11);
-            const immh = @truncate(u4, op >> 19);
-            const immb = @truncate(u3, op >> 16);
+            const q = @as(u1, @truncate(op >> 30));
+            const u = @as(u1, @truncate(op >> 29));
+            const opcode = @as(u5, @truncate(op >> 11));
+            const immh = @as(u4, @truncate(op >> 19));
+            const immb = @as(u3, @truncate(op >> 16));
             const immhimmb = @as(u8, immh) << 3 | immb;
             return if (opcode == 0b00000) blk: {
                 const t = if (matches(immh, "0b0001") and q == 0b0)
@@ -6268,19 +6273,19 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0b0xx0") and matches(op1, "0b1x") and matches(op3, "0bxxxxxxxx0")) { // SIMD vector x indexed element
-            const q = @truncate(u1, op >> 30);
-            const u = @truncate(u1, op >> 29);
-            const size = @truncate(u2, op >> 22);
-            const l = @truncate(u1, op >> 21);
-            const m = @truncate(u1, op >> 20);
-            const rm = @truncate(u4, op >> 16);
-            const h = @truncate(u1, op >> 11);
+            const q = @as(u1, @truncate(op >> 30));
+            const u = @as(u1, @truncate(op >> 29));
+            const size = @as(u2, @truncate(op >> 22));
+            const l = @as(u1, @truncate(op >> 21));
+            const m = @as(u1, @truncate(op >> 20));
+            const rm = @as(u4, @truncate(op >> 16));
+            const h = @as(u1, @truncate(op >> 11));
             const sizeq = @as(u3, size) << 1 | q;
             const mrm = @as(u5, m) << 4 | rm;
-            const sz = @truncate(u1, size);
+            const sz = @as(u1, @truncate(size));
             const qsz = @as(u2, q) << 1 | sz;
             const szl = @as(u2, sz) << 1 | l;
-            const opcode = @truncate(u4, op >> 12);
+            const opcode = @as(u4, @truncate(op >> 12));
             return if (u == 0b0 and opcode == 0b0010)
                 Instruction{ .smlal = SIMDDataProcInstr{
                     .q = q == 1,
@@ -6712,7 +6717,7 @@ pub const Disassembler = struct {
                 Instruction{ .sqrdmlsh = undefined }
             else if (u == 0b1 and size == 0b00 and opcode == 0b1001)
                 Instruction{ .fmulx = undefined }
-            else if (u == 0b1 and size == 0b01 and @truncate(u1, opcode >> 3) == 0b0 and @truncate(u1, opcode) == 0b1)
+            else if (u == 0b1 and size == 0b01 and @as(u1, @truncate(opcode >> 3)) == 0b0 and @as(u1, @truncate(opcode)) == 0b1)
                 Instruction{ .fcmla = undefined }
             else if (u == 0b1 and size >= 0b10 and opcode == 0b1001)
                 Instruction{ .fmulx = SIMDDataProcInstr{
@@ -6734,7 +6739,7 @@ pub const Disassembler = struct {
                     else
                         return error.Unallocated,
                 } }
-            else if (u == 0b1 and size == 0b10 and @truncate(u1, opcode >> 3) == 0b0 and @truncate(u1, opcode) == 0b1)
+            else if (u == 0b1 and size == 0b10 and @as(u1, @truncate(opcode >> 3)) == 0b0 and @as(u1, @truncate(opcode)) == 0b1)
                 Instruction{ .fcmla = undefined }
             else if (u == 0b1 and size == 0b10 and opcode == 0b1000)
                 Instruction{ .fmlal = undefined }
@@ -6753,12 +6758,12 @@ pub const Disassembler = struct {
         } else if (matches(op0, "0b1100") and matches(op1, "0b01") and matches(op2, "0b1000") and matches(op3, "0b0001000xx")) { // Crypto two reg, sha512
             return error.Unimplemented;
         } else if (matches(op0, "0bx0x1") and matches(op1, "0b0x") and matches(op2, "0bx0xx")) { // Conversion between floating-point and fixed-point
-            const sf = @truncate(u1, op >> 31);
-            const s = @truncate(u1, op >> 29);
-            const ptype = @truncate(u2, op >> 22);
-            const rmode = @truncate(u2, op >> 19);
-            const opcode = @truncate(u3, op >> 16);
-            const scale = @truncate(u6, op >> 10);
+            const sf = @as(u1, @truncate(op >> 31));
+            const s = @as(u1, @truncate(op >> 29));
+            const ptype = @as(u2, @truncate(op >> 22));
+            const rmode = @as(u2, @truncate(op >> 19));
+            const opcode = @as(u3, @truncate(op >> 16));
+            const scale = @as(u6, @truncate(op >> 10));
             const rd_width = if (sf == 0b1) Width.x else Width.w;
             const rn_width = switch (ptype) {
                 0b00 => Width.s,
@@ -6769,19 +6774,19 @@ pub const Disassembler = struct {
             const to_fixed_payload = CvtInstr{
                 .rd = Register.from(op, rd_width, false),
                 .rn = Register.from(op >> 5, rn_width, false),
-                .fbits = @truncate(u6, op >> 10),
+                .fbits = @as(u6, @truncate(op >> 10)),
             };
             const to_float_payload = CvtInstr{
                 .rd = Register.from(op, rn_width, false),
                 .rn = Register.from(op >> 5, rd_width, false),
-                .fbits = @truncate(u6, op >> 10),
+                .fbits = @as(u6, @truncate(op >> 10)),
             };
             return if ((sf == 0b0 and scale <= 0b011111) or
                 s == 0b1 or ptype == 0b10 or opcode >= 0b100 or
-                (@truncate(u1, rmode) == 0b0 and @truncate(u2, opcode >> 1) == 0b00) or
-                (@truncate(u1, rmode) == 0b1 and @truncate(u2, opcode >> 1) == 0b01) or
-                (@truncate(u1, rmode >> 1) == 0b0 and @truncate(u2, opcode >> 1) == 0b00) or
-                (@truncate(u1, rmode >> 1) == 0b1 and @truncate(u2, opcode >> 1) == 0b01))
+                (@as(u1, @truncate(rmode)) == 0b0 and @as(u2, @truncate(opcode >> 1)) == 0b00) or
+                (@as(u1, @truncate(rmode)) == 0b1 and @as(u2, @truncate(opcode >> 1)) == 0b01) or
+                (@as(u1, @truncate(rmode >> 1)) == 0b0 and @as(u2, @truncate(opcode >> 1)) == 0b00) or
+                (@as(u1, @truncate(rmode >> 1)) == 0b1 and @as(u2, @truncate(opcode >> 1)) == 0b01))
                 error.Unallocated
             else if (rmode == 0b11 and opcode == 0b001)
                 Instruction{ .fcvtzu = to_fixed_payload }
@@ -6794,29 +6799,29 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0bx0x1") and matches(op1, "0b0x") and matches(op2, "0bx1xx") and matches(op3, "0bxxx000000")) { // Conversion between floating point and integer
-            const sf = @truncate(u1, op >> 31);
-            const s = @truncate(u1, op >> 29);
-            const ptype = @truncate(u2, op >> 22);
-            const rmode = @truncate(u2, op >> 19);
-            const opcode = @truncate(u3, op >> 16);
-            return if ((@truncate(u1, rmode) == 0b1 and @truncate(u2, opcode >> 1) == 0b01) or
-                (@truncate(u1, rmode) == 0b1 and @truncate(u2, opcode >> 1) == 0b10) or
-                (@truncate(u1, rmode >> 1) == 0b1 and @truncate(u2, opcode >> 1) == 0b01) or
-                (@truncate(u1, rmode >> 1) == 0b1 and @truncate(u2, opcode >> 1) == 0b10) or
-                (s == 0b0 and ptype == 0b10 and @truncate(u1, opcode >> 2) == 0b0) or
-                (s == 0b0 and ptype == 0b10 and @truncate(u2, opcode >> 1) == 0b10) or
+            const sf = @as(u1, @truncate(op >> 31));
+            const s = @as(u1, @truncate(op >> 29));
+            const ptype = @as(u2, @truncate(op >> 22));
+            const rmode = @as(u2, @truncate(op >> 19));
+            const opcode = @as(u3, @truncate(op >> 16));
+            return if ((@as(u1, @truncate(rmode)) == 0b1 and @as(u2, @truncate(opcode >> 1)) == 0b01) or
+                (@as(u1, @truncate(rmode)) == 0b1 and @as(u2, @truncate(opcode >> 1)) == 0b10) or
+                (@as(u1, @truncate(rmode >> 1)) == 0b1 and @as(u2, @truncate(opcode >> 1)) == 0b01) or
+                (@as(u1, @truncate(rmode >> 1)) == 0b1 and @as(u2, @truncate(opcode >> 1)) == 0b10) or
+                (s == 0b0 and ptype == 0b10 and @as(u1, @truncate(opcode >> 2)) == 0b0) or
+                (s == 0b0 and ptype == 0b10 and @as(u2, @truncate(opcode >> 1)) == 0b10) or
                 (s == 0b1) or
-                (sf == 0b0 and s == 0b0 and ptype == 0b00 and @truncate(u1, rmode) == 0b1 and @truncate(u2, opcode >> 1) == 0b11) or
-                (sf == 0b0 and s == 0b0 and ptype == 0b00 and @truncate(u1, rmode >> 1) == 0b1 and @truncate(u2, opcode >> 1) == 0b11) or
-                (sf == 0b0 and s == 0b0 and ptype == 0b01 and @truncate(u1, rmode >> 1) == 0b0 and @truncate(u2, opcode >> 1) == 0b11) or
-                (sf == 0b0 and s == 0b0 and ptype == 0b01 and rmode == 0b10 and @truncate(u2, opcode >> 1) == 0b11) or
+                (sf == 0b0 and s == 0b0 and ptype == 0b00 and @as(u1, @truncate(rmode)) == 0b1 and @as(u2, @truncate(opcode >> 1)) == 0b11) or
+                (sf == 0b0 and s == 0b0 and ptype == 0b00 and @as(u1, @truncate(rmode >> 1)) == 0b1 and @as(u2, @truncate(opcode >> 1)) == 0b11) or
+                (sf == 0b0 and s == 0b0 and ptype == 0b01 and @as(u1, @truncate(rmode >> 1)) == 0b0 and @as(u2, @truncate(opcode >> 1)) == 0b11) or
+                (sf == 0b0 and s == 0b0 and ptype == 0b01 and rmode == 0b10 and @as(u2, @truncate(opcode >> 1)) == 0b11) or
                 (sf == 0b0 and s == 0b0 and ptype == 0b01 and rmode == 0b11 and opcode == 0b111) or
-                (sf == 0b0 and s == 0b0 and ptype == 0b10 and @truncate(u2, opcode >> 1) == 0b11) or
-                (sf == 0b1 and s == 0b0 and ptype == 0b00 and @truncate(u2, opcode >> 1) == 0b11) or
-                (sf == 0b1 and s == 0b0 and ptype == 0b01 and @truncate(u1, rmode) == 0b1 and @truncate(u2, opcode >> 1) == 0b11) or
-                (sf == 0b1 and s == 0b0 and ptype == 0b01 and @truncate(u1, rmode >> 1) == 0b1 and @truncate(u2, opcode >> 1) == 0b11) or
-                (sf == 0b1 and s == 0b0 and ptype == 0b10 and @truncate(u1, rmode) == 0b0 and @truncate(u2, opcode >> 1) == 0b11) or
-                (sf == 0b1 and s == 0b0 and ptype == 0b10 and @truncate(u1, rmode >> 1) == 0b1 and @truncate(u2, opcode >> 1) == 0b11))
+                (sf == 0b0 and s == 0b0 and ptype == 0b10 and @as(u2, @truncate(opcode >> 1)) == 0b11) or
+                (sf == 0b1 and s == 0b0 and ptype == 0b00 and @as(u2, @truncate(opcode >> 1)) == 0b11) or
+                (sf == 0b1 and s == 0b0 and ptype == 0b01 and @as(u1, @truncate(rmode)) == 0b1 and @as(u2, @truncate(opcode >> 1)) == 0b11) or
+                (sf == 0b1 and s == 0b0 and ptype == 0b01 and @as(u1, @truncate(rmode >> 1)) == 0b1 and @as(u2, @truncate(opcode >> 1)) == 0b11) or
+                (sf == 0b1 and s == 0b0 and ptype == 0b10 and @as(u1, @truncate(rmode)) == 0b0 and @as(u2, @truncate(opcode >> 1)) == 0b11) or
+                (sf == 0b1 and s == 0b0 and ptype == 0b10 and @as(u1, @truncate(rmode >> 1)) == 0b1 and @as(u2, @truncate(opcode >> 1)) == 0b11))
                 error.Unallocated
             else if ((sf == 0b0 and ptype == 0b00 and rmode == 0b00 and opcode == 0b110) or
                 (sf == 0b0 and ptype == 0b00 and rmode == 0b00 and opcode == 0b111) or
@@ -6918,17 +6923,17 @@ pub const Disassembler = struct {
                     error.Unallocated;
             };
         } else if (matches(op0, "0bx0x1") and matches(op1, "0b0x") and matches(op2, "0bx1xx") and matches(op3, "0bxxxx10000")) { // Floating-point data processing (1 source)
-            const m = @truncate(u1, op >> 31);
-            const s = @truncate(u1, op >> 29);
-            const ptype = @truncate(u2, op >> 22);
-            const opcode = @truncate(u6, op >> 15);
+            const m = @as(u1, @truncate(op >> 31));
+            const s = @as(u1, @truncate(op >> 29));
+            const ptype = @as(u2, @truncate(op >> 22));
+            const opcode = @as(u6, @truncate(op >> 15));
             const ftype_width = switch (ptype) {
                 0b00 => Width.s,
                 0b01 => Width.d,
                 0b11 => Width.h,
                 else => unreachable,
             };
-            const opc_width = switch (@truncate(u2, opcode)) {
+            const opc_width = switch (@as(u2, @truncate(opcode))) {
                 0b00 => Width.s,
                 0b01 => Width.d,
                 0b11 => Width.h,
@@ -6992,12 +6997,12 @@ pub const Disassembler = struct {
                 error.Unallocated;
         } else if (matches(op0, "0bx0x1") and matches(op1, "0b0x") and matches(op2, "0bx1xx") and matches(op3, "0bxxxxx1000")) // Floating-point compare
         {
-            const m = @truncate(u1, op >> 31);
-            const s = @truncate(u1, op >> 29);
-            const ftype = @truncate(u2, op >> 22);
-            const o1 = @truncate(u2, op >> 14);
-            const opc = @truncate(u1, op >> 3);
-            const opcode2 = @truncate(u5, op);
+            const m = @as(u1, @truncate(op >> 31));
+            const s = @as(u1, @truncate(op >> 29));
+            const ftype = @as(u2, @truncate(op >> 22));
+            const o1 = @as(u2, @truncate(op >> 14));
+            const opc = @as(u1, @truncate(op >> 3));
+            const opcode2 = @as(u5, @truncate(op));
             const e = opcode2 == 0b10000 or opcode2 == 0b11000;
             const width = if (ftype == 0b11)
                 Width.h
@@ -7018,24 +7023,24 @@ pub const Disassembler = struct {
                 .rn = Register.from(op >> 5, width, false),
                 .payload = rm_or_zero,
             };
-            return if (m == 0b1 or s == 0b1 or ftype == 0b10 or o1 != 0b00 or @truncate(u3, opcode2) != 0b00)
+            return if (m == 0b1 or s == 0b1 or ftype == 0b10 or o1 != 0b00 or @as(u3, @truncate(opcode2)) != 0b00)
                 error.Unallocated
             else
                 Instruction{ .fcmp = payload };
         } else if (matches(op0, "0bx0x1") and matches(op1, "0b0x") and matches(op2, "0bx1xx") and matches(op3, "0bxxxxxx100")) { // Floating-point immediate
-            const m = @truncate(u1, op >> 31);
-            const s = @truncate(u1, op >> 29);
-            const ptype = @truncate(u2, op >> 22);
-            const imm5 = @truncate(u5, op >> 5);
-            const imm8 = @truncate(u8, op >> 13);
-            const a = @truncate(u1, imm8 >> 7);
-            const b = @truncate(u1, imm8 >> 6);
-            const c = @truncate(u1, imm8 >> 5);
-            const d = @truncate(u1, imm8 >> 4);
-            const e = @truncate(u1, imm8 >> 3);
-            const f = @truncate(u1, imm8 >> 2);
-            const g = @truncate(u1, imm8 >> 1);
-            const h = @truncate(u1, imm8);
+            const m = @as(u1, @truncate(op >> 31));
+            const s = @as(u1, @truncate(op >> 29));
+            const ptype = @as(u2, @truncate(op >> 22));
+            const imm5 = @as(u5, @truncate(op >> 5));
+            const imm8 = @as(u8, @truncate(op >> 13));
+            const a = @as(u1, @truncate(imm8 >> 7));
+            const b = @as(u1, @truncate(imm8 >> 6));
+            const c = @as(u1, @truncate(imm8 >> 5));
+            const d = @as(u1, @truncate(imm8 >> 4));
+            const e = @as(u1, @truncate(imm8 >> 3));
+            const f = @as(u1, @truncate(imm8 >> 2));
+            const g = @as(u1, @truncate(imm8 >> 1));
+            const h = @as(u1, @truncate(imm8));
             const rd_width = switch (ptype) {
                 0b00 => Width.s,
                 0b01 => Width.d,
@@ -7043,8 +7048,8 @@ pub const Disassembler = struct {
                 else => unreachable,
             };
             const fp_const = switch (rd_width) {
-                .h => @floatCast(f64, toFloatingPointConst(f16, a, b, c, d, e, f, g, h)),
-                .s => @floatCast(f64, toFloatingPointConst(f32, a, b, c, d, e, f, g, h)),
+                .h => @as(f64, @floatCast(toFloatingPointConst(f16, a, b, c, d, e, f, g, h))),
+                .s => @as(f64, @floatCast(toFloatingPointConst(f32, a, b, c, d, e, f, g, h))),
                 .d => toFloatingPointConst(f64, a, b, c, d, e, f, g, h),
                 else => unreachable,
             };
@@ -7057,10 +7062,10 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0bx0x1") and matches(op1, "0b0x") and matches(op2, "0bx1xx") and matches(op3, "0bxxxxxxx01")) { // Floating-point conditional compare
-            const m = @truncate(u1, op >> 31);
-            const s = @truncate(u1, op >> 29);
-            const ftype = @truncate(u2, op >> 22);
-            const o1 = @truncate(u1, op >> 4);
+            const m = @as(u1, @truncate(op >> 31));
+            const s = @as(u1, @truncate(op >> 29));
+            const ftype = @as(u2, @truncate(op >> 22));
+            const o1 = @as(u1, @truncate(op >> 4));
             const width = if (ftype == 0b11)
                 Width.h
             else if (ftype == 0b00)
@@ -7073,18 +7078,18 @@ pub const Disassembler = struct {
                 .e = o1 == 0b1,
                 .rn = Register.from(op >> 5, width, false),
                 .rm = Register.from(op >> 16, width, false),
-                .nzcv = @truncate(u4, op),
-                .cond = @intToEnum(Condition, @truncate(u4, op >> 12)),
+                .nzcv = @as(u4, @truncate(op)),
+                .cond = @enumFromInt(@as(u4, @truncate(op >> 12))),
             };
             return if (m == 0b1 or s == 0b1 or ftype == 0b10)
                 error.Unallocated
             else
                 Instruction{ .fccmp = payload };
         } else if (matches(op0, "0bx0x1") and matches(op1, "0b0x") and matches(op2, "0bx1xx") and matches(op3, "0bxxxxxxx10")) { // Floating-point data processing (2 source)
-            const m = @truncate(u1, op >> 31);
-            const s = @truncate(u1, op >> 29);
-            const ptype = @truncate(u2, op >> 22);
-            const opcode = @truncate(u4, op >> 12);
+            const m = @as(u1, @truncate(op >> 31));
+            const s = @as(u1, @truncate(op >> 29));
+            const ptype = @as(u2, @truncate(op >> 22));
+            const opcode = @as(u4, @truncate(op >> 12));
             const width = switch (ptype) {
                 0b00 => Width.s,
                 0b01 => Width.d,
@@ -7119,9 +7124,9 @@ pub const Disassembler = struct {
             else
                 error.Unallocated;
         } else if (matches(op0, "0bx0x1") and matches(op1, "0b0x") and matches(op2, "0bx1xx") and matches(op3, "0bxxxxxxx11")) { // Floating-point conditional select
-            const m = @truncate(u1, op >> 31);
-            const s = @truncate(u1, op >> 29);
-            const ftype = @truncate(u2, op >> 22);
+            const m = @as(u1, @truncate(op >> 31));
+            const s = @as(u1, @truncate(op >> 29));
+            const ftype = @as(u2, @truncate(op >> 22));
             const width = if (ftype == 0b11)
                 Width.h
             else if (ftype == 0b00)
@@ -7134,18 +7139,18 @@ pub const Disassembler = struct {
                 .rn = Register.from(op >> 5, width, false),
                 .rd = Register.from(op, width, false),
                 .rm = Register.from(op >> 16, width, false),
-                .cond = @intToEnum(Condition, @truncate(u4, op >> 12)),
+                .cond = @enumFromInt(@as(u4, @truncate(op >> 12))),
             };
             return if (m == 0b1 or s == 0b1 or ftype == 0b10)
                 error.Unallocated
             else
                 Instruction{ .fcsel = payload };
         } else if (matches(op0, "0bx0x1") and matches(op1, "0b1x")) {
-            const m = @truncate(u1, op >> 31);
-            const s = @truncate(u1, op >> 29);
-            const ptype = @truncate(u2, op >> 22);
-            const o1 = @truncate(u1, op >> 21);
-            const o0 = @truncate(u1, op >> 15);
+            const m = @as(u1, @truncate(op >> 31));
+            const s = @as(u1, @truncate(op >> 29));
+            const ptype = @as(u2, @truncate(op >> 22));
+            const o1 = @as(u1, @truncate(op >> 21));
+            const o0 = @as(u1, @truncate(op >> 15));
             const width = switch (ptype) {
                 0b00 => Width.s,
                 0b01 => Width.d,
@@ -7176,7 +7181,7 @@ pub const Disassembler = struct {
 
 fn toFloatingPointConst(comptime T: type, a: u1, b: u1, c: u1, d: u1, e: u1, f: u1, g: u1, h: u1) T {
     return switch (T) {
-        f16 => @bitCast(f16, 0 |
+        f16 => @bitCast(0 |
             @as(u16, a) << 15 |
             @as(u16, ~b) << 14 |
             @as(u16, b) << 13 |
@@ -7187,7 +7192,7 @@ fn toFloatingPointConst(comptime T: type, a: u1, b: u1, c: u1, d: u1, e: u1, f: 
             @as(u16, f) << 8 |
             @as(u16, g) << 7 |
             @as(u16, h) << 6),
-        f32 => @bitCast(f32, 0 |
+        f32 => @bitCast(0 |
             @as(u32, a) << 31 |
             @as(u32, ~b) << 30 |
             @as(u32, b) << 29 |
@@ -7201,7 +7206,7 @@ fn toFloatingPointConst(comptime T: type, a: u1, b: u1, c: u1, d: u1, e: u1, f: 
             @as(u32, f) << 21 |
             @as(u32, g) << 20 |
             @as(u32, h) << 19),
-        f64 => @bitCast(f64, 0 |
+        f64 => @bitCast(0 |
             @as(u64, a) << 63 |
             @as(u64, ~b) << 62 |
             @as(u64, b) << 61 |
